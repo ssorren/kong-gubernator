@@ -1,0 +1,1 @@
+docker build --no-cache --platform linux/arm64 -t kong-throttler . 

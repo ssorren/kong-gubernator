@@ -1,0 +1,104 @@
+# Welcome to Konnect!
+# In this quickstart, you'll set up a sample API and test key Kong Gateway
+# features, including authentication and rate-limiting. Using decK, you'll
+# sync the configuration in this file to a Serverless Gateway, giving you
+# hands-on experience with managing Gateway setups as code.
+# Once you're comfortable, you can define your own API in a decK configuration
+# or sync this configuration to a Gateway running in another environment.
+
+_format_version: "3.0"
+
+services:
+  - name: llm_service
+    url: http://fake.host.internal
+    routes:
+    - name: openai-chat
+      paths:
+        - "~/openai-chat$"
+      methods:
+        - POST
+      plugins:
+        - name: gubernator
+          config:
+            global_duration_seconds: 1
+            global_limit: -1
+            message: gubernated
+            rules:
+            - duration_seconds: 3
+              header_name: session_id
+              key_prefix: csid
+              limit: 1
+              name: session-request-limit
+              limit_type: REQUESTS
+            - duration_seconds: 1
+              header_name: department_id
+              key_prefix: cdid
+              limit: 10
+              name: department-request-limit
+              limit_type: REQUESTS
+        - name: ai-proxy-advanced
+          config:
+            targets:
+            - route_type: "llm/v1/chat"
+              auth:
+                header_name: "Authorization"
+                header_value: "Bearer <your key>"  # add your own OpenAI API key
+              model:
+                provider: "openai"
+                name: "gpt-4o"
+                options:
+                  max_tokens: 512
+                  temperature: 1.0
+    - name: developer-helper
+      paths:
+        - "~/dev-helper$"
+      methods:
+        - POST
+      plugins:
+        - config:
+            max_request_body_size: 8192
+            prompts:
+              append: null
+              prepend:
+              - content: You are a software engineer
+                role: system
+          enabled: true
+          name: ai-prompt-decorator
+          protocols:
+          - grpc
+          - grpcs
+          - http
+          - https
+        - config:
+            global_duration_seconds: 1
+            global_limit: -1
+            message: gubernated
+            rules:
+            - duration_seconds: 5
+              header_name: session_id
+              key_prefix: dhsid
+              limit: 1
+              name: session-request-limit
+              limit_type: TOKENS
+            - duration_seconds: 30
+              header_name: department_id
+              key_prefix: dhdid
+              limit: 256
+              name: department-token-limit
+              limit_type: TOKENS
+          enabled: true
+          name: gubernator
+        - name: ai-proxy-advanced
+          config:
+            targets:
+            - route_type: "llm/v1/chat"
+              auth:
+                header_name: "Authorization"
+                header_value: "Bearer <your key>"  # add your own OpenAI API key
+              model:
+                provider: "openai"
+                name: "gpt-4o"
+                options:
+                  max_tokens: 1024
+                  temperature: 1.0
+
