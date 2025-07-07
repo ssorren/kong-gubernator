@@ -39,7 +39,7 @@ function helper:async_call_rate_limiter(throttle_requests, timer)
     end
     local name, err = helper:get_timer():at(0.1, consume)
     if err then
-        kong.log("Error scheduling requests: ", err2)
+        kong.log("Error scheduling requests: ", err)
     end
 end
 
