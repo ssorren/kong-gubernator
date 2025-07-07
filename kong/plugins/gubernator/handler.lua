@@ -3,7 +3,7 @@ local cjson = require("cjson.safe")
 local timer = require("resty.timerng")
 
 local GubernatorHandler = {
-    PRIORITY = 1,
+    PRIORITY = 910,
     VERSION = "0.0.1",
 }
 
