@@ -1,0 +1,140 @@
+kind: KonnectExtension
+apiVersion: konnect.konghq.com/v1alpha1
+metadata:
+ name: konnect-config1
+ namespace: kong
+spec:
+ clientAuth:
+   certificateSecret:
+     provisioning: Automatic
+ konnect:
+   controlPlane:
+     ref:
+       type: konnectNamespacedRef
+       konnectNamespacedRef:
+         name: gubernator
+---
+apiVersion: gateway-operator.konghq.com/v1beta1
+kind: DataPlane
+metadata:
+  name: dataplane1
+  namespace: kong
+spec:
+ extensions:
+ - kind: KonnectExtension
+   name: konnect-config1
+   group: konnect.konghq.com
+ deployment:
+   replicas: 3
+   podTemplateSpec:
+     spec:
+       serviceAccountName: gubernator
+       containers:
+       - name: proxy
+         image: sal1103/kong-gubernated:3.10.3
+         resources:
+           requests:
+             cpu: 2
+             memory: "2Gi"
+           limits:
+             cpu: 4
+             memory: "3Gi"
+         env:
+           - name: KONG_LOG_LEVEL
+             value: notice
+           - name: KONG_PROXY_ACCESS_LOG
+             value: "off"
+           - name: KONG_NGINX_WORKER_PROCESSES
+             value: "4"
+           - name: KONG_PLUGINS
+             value: "bundled,gubernator"
+       initContainers:
+       - image: ghcr.io/gubernator-io/gubernator:v2.13.0
+         resources:
+           requests:
+             cpu: 1
+             memory: "2Gi"
+           limits:
+             cpu: 4
+             memory: "3Gi"
+         imagePullPolicy: IfNotPresent
+         ports:
+          - name: grpc-port
+            containerPort: 1051
+          - name: http-port
+            containerPort: 1050
+         name: gubernator
+         env:
+          - name: GUBER_K8S_NAMESPACE
+            value: kong
+            # valueFrom:
+            #  fieldRef:
+            #   fieldPath: metadata.namespacekong
+          - name: GUBER_K8S_POD_IP
+            valueFrom:
+             fieldRef:
+              fieldPath: status.podIP
+          # Must set the GRPC and HTTP addresses, as gubernator
+          # defaults to listening on localhost only
+          - name: GUBER_GRPC_ADDRESS
+            value: 0.0.0.0:1051
+          - name: GUBER_HTTP_ADDRESS
+            value: 0.0.0.0:1050
+          # Use the k8s API for peer discovery
+          - name: GUBER_PEER_DISCOVERY_TYPE
+            value: "k8s"
+          # This should match the port number GRPC is listening on
+          # as defined by `containerPort`
+          - name: GUBER_K8S_POD_PORT
+            value: "1051"
+          # The selector used when listing endpoints. This selector
+          # should only select gubernator peers.
+          - name: GUBER_K8S_ENDPOINTS_SELECTOR
+            value: "app=dataplane1"
+          # Gubernator can watch 'endpoints' for changes to the peers
+          # or it can watch 'pods' (Defaults to 'endpoints')
+          - name: GUBER_K8S_WATCH_MECHANISM
+            value: "pods"
+          # Enable debug for diagnosing issues
+          - name: GUBER_DEBUG
+            value: "true"
+          # Defines the max age of a client connection
+          # Default is infinity
+          # - name: GUBER_GRPC_MAX_CONN_AGE_SEC
+          #  value: "30"
+          - name: OTEL_TRACES_SAMPLER
+            value: "always_off"
+          # - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          #   value: "http://datadog.datadog:4317"
+          # - name: OTEL_EXPORTER_OTLP_PROTOCOL
+          #   value: "grpc"
+          # - name: OTEL_TRACES_SAMPLER
+          #   value: parentbased_traceidratio
+          # - name: OTEL_TRACES_SAMPLER_ARG # https://github.com/gubernator-io/gubernator/blob/master/docs/tracing.md#sampling
+          #   value: "1.0" # in prod should be less....
+         restartPolicy: Always
+         readinessProbe:
+          httpGet:
+            path: /v1/HealthCheck
+            port: 1050
+          # initialDelaySeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+         livenessProbe:
+          httpGet:
+            path: /v1/HealthCheck
+            port: 1050
+          # initialDelaySeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+       nodeSelector:
+         "alpha.eksctl.io/nodegroup-name": "node-ai-gateway"
+ network:
+   services:
+     ingress:
+       name: proxy1
+       type: LoadBalancer
+       annotations:
+         "service.beta.kubernetes.io/aws-load-balancer-type": "nlb"
+         "service.beta.kubernetes.io/aws-load-balancer-nlb-target-type": "ip"
+         "service.beta.kubernetes.io/aws-load-balancer-scheme": "internet-facing"

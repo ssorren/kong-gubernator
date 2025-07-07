@@ -10,12 +10,8 @@ local GubernatorHandler = {
 local helper = {}
 local timer_sys
 
--- do
---     timer_sys = timer.new({})
---     timer_sys:start()
--- end
 
-function get_timer()
+function helper:get_timer()
     if timer_sys == nil then
         timer_sys = timer.new({})
         timer_sys:start()
@@ -23,7 +19,7 @@ function get_timer()
     return timer_sys
 end
 
-function callRateLimiter(throttle_requests)    
+function helper:call_rate_limiter(throttle_requests)    
     local hits =  cjson.encode({requests = throttle_requests})
     return http.new():request_uri("http://localhost:1050/v1/GetRateLimits", {
         method = "POST",
@@ -34,14 +30,14 @@ function callRateLimiter(throttle_requests)
     })
 end
 
-function asyncCallRateLimiter(throttle_requests, timer)
+function helper:async_call_rate_limiter(throttle_requests, timer)
     local function consume() 
-        local res, err = callRateLimiter(throttle_requests)
+        local res, err = helper:call_rate_limiter(throttle_requests)
         if err then
-            kong.log("Error consumeing throttle requests: ", err)
+            kong.log("Error consuming throttle requests: ", err)
         end
     end
-    local name, err = get_timer():at(0.1, consume)
+    local name, err = helper:get_timer():at(0.1, consume)
     if err then
         kong.log("Error scheduling requests: ", err2)
     end
@@ -52,7 +48,7 @@ function GubernatorHandler:access(conf)
     if not throttle_requests then
         return kong.response.exit(400)
     end
-    local res, err = callRateLimiter(throttle_requests.all)
+    local res, err = helper:call_rate_limiter(throttle_requests.all)
     if err then
         kong.log("Error calling gubernator: ", err)
         return
@@ -73,8 +69,8 @@ function GubernatorHandler:access(conf)
     do
         rule.hits = "1"
     end
-    
-    asyncCallRateLimiter(throttle_requests.by_request)
+
+    helper:async_call_rate_limiter(throttle_requests.by_request)
 end
 
 function GubernatorHandler:body_filter(conf)
@@ -83,9 +79,13 @@ function GubernatorHandler:body_filter(conf)
         return
     end
     local body = kong.response.get_raw_body()
+    if not body then
+        return
+    end
     local body_table, err = cjson.decode(body)
     if err then
         kong.log("Error parsing body: ", err)
+        kong.log("Error parsing body status: ", status)
         return
     end
 
@@ -94,7 +94,7 @@ function GubernatorHandler:body_filter(conf)
         if not throttle_requests or #throttle_requests.by_token == 0 then
             return
         end
-        asyncCallRateLimiter(throttle_requests.by_token)
+        helper:async_call_rate_limiter(throttle_requests.by_token)
         kong.log("response ctx:", cjson.encode(kong.ctx))
     end
 end
@@ -129,13 +129,6 @@ function helper:get_throttle_requests(conf, hits)
     end
 
     return res
-end
-
-function helper:http_client()
-    if self.httpc == nil then
-       self.httpc = http.new()
-    end
-    return self.httpc
 end
 
    

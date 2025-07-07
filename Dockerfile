@@ -1,31 +1,18 @@
+FROM kong/kong-gateway:3.10.0.3
 
-FROM golang:1.24-alpine AS builder
-
-WORKDIR /throttler
-COPY go.mod go.sum ./
-RUN go mod download
-COPY . ./
-RUN go build -o /out/throttler
-
-FROM kong/kong-gateway:3.10.0.0
+# Ensure any patching steps are executed as root user
 USER root
 
-COPY --from=builder /out/throttler /usr/local/bin/throttler
+# Add custom plugin to the image
 COPY ./kong/plugins/gubernator /usr/local/share/lua/5.1/kong/plugins/gubernator
-ENV KONG_PLUGINS=bundled,throttler,gubernator   
+ENV KONG_PLUGINS=bundled,gubernator
 
-COPY docker-entrypoint.sh /docker-entrypoint.sh
-COPY kong.conf /etc/kong/kong.conf
-COPY gubernator.conf /etc/kong/gubernator.conf
-
+# Ensure kong user is selected for image execution
 USER kong
-  
-ENTRYPOINT ["/docker-entrypoint.sh"]
-  
-EXPOSE 8000 8443 8001 8444 8002 8445 8003 8446 8004 8447
-  
-STOPSIGNAL SIGQUIT
-  
-HEALTHCHECK --interval=10s --timeout=10s --retries=10 CMD kong health
 
+# Run kong
+ENTRYPOINT ["/entrypoint.sh"]
+EXPOSE 8000 8443 8001 8444
+STOPSIGNAL SIGQUIT
+HEALTHCHECK --interval=10s --timeout=10s --retries=10 CMD kong health
 CMD ["kong", "docker-start"]
