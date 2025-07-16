@@ -1,4 +1,4 @@
-FROM kong/kong-gateway:3.10.0.3
+FROM kong/kong-gateway:3.11
 
 # Ensure any patching steps are executed as root user
 USER root

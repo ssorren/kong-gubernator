@@ -163,35 +163,6 @@ In order to perform kubectl operations, you will need to set your config to the 
 aws eks update-kubeconfig --region $AWS_DEFAULT_REGION --name ssorren-ratelimit
 ```
 
-## Prometheus
-
-````
-helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
-helm repo update
-````
-
-
-```
-helm install prometheus -n prometheus prometheus-community/kube-prometheus-stack \
---create-namespace \
---set alertmanager.enabled=false \
---set prometheus.prometheusSpec.maximumStartupDurationSeconds=300 \
---set grafana.service.type=LoadBalancer \
---set grafana.service.annotations."service\.beta\.kubernetes\.io/aws-load-balancer-scheme"="internet-facing" \
---set grafana.service.annotations."service\.beta\.kubernetes\.io/aws-load-balancer-nlb-target-type"="ip"
-```
-
-```
-GRAFANA_LB=$(kubectl get service prometheus-grafana -n prometheus -o json | jq -r '.status.loadBalancer.ingress[].hostname')
-
-open -a "Google Chrome" "http://${GRAFANA_LB}"
-```
-
-To login use Prometheus Stack credentials:
-* User ID: ``admin``
-* Password: ``prom-operator``
-
-
 
 # Kong Konnect
 
@@ -255,7 +226,8 @@ kubectl get secret konnect-pat -n kong -o jsonpath='{.data.*}' | base64 -d
 The Control Plane installation uses the following [cp.yaml](../kgo/cp.yaml) file.
 
 ```
-kubectl apply -f ./cp.yaml
+kubectl apply -f ./control-plane.yaml
+kubectl apply -f ./role-binding.yaml.yaml
 ```
 
 
@@ -264,7 +236,7 @@ kubectl apply -f ./cp.yaml
 The Data Plane uses the [dp.yaml](../kgo/dp.yaml) file. Note the deployment also spings up 3 replicas for the Data Plane:
 
 ```
-kubectl apply -f ./dp.yaml
+kubectl apply -f ./data-plane.yaml
 ```
 
 #### Check DP's logs
@@ -304,48 +276,8 @@ http $DATAPLANE_LB
 ```
 
 
-## Send requests to Data Plane
-
-Make sure you have the ``DATAPLANE_LB`` and ``PROMPT`` environment variables set. Use [Prompt #3](./prompts.md#prompt-3-used-for-the-tests).
-
-
 ```
-curl -i --request POST \
-  --url http://$DATAPLANE_LB/llm_route \
-  --header 'Content-Type: application/json' \
-  --data '{
-     "messages": [
-       {
-         "role": "user",
-         "content": "'"$PROMPT"'"
-       }
-     ]
-}'
-```
-
-
-
-
-## K6
-
-Still inside the K6's EC2 use the same [Kong's K6 script](../k6/kong.js) to run the performance test. Make sure you have the ``DATAPLANE_LB`` environment variable set with the Konnect DP's NLB DNS Name and the ``PROMPT`` environment variable set.
-
-```
-k6 run kong.js
-```
-
-
-## Delete the Kong Konnect Data Plane deployment
-
-```
-kubectl delete dataplane dataplane1 -n kong
-```
-
-
-```
-kubectl create secret docker-registry ssorren-ecr-secret \
-      --docker-server=162225303348.dkr.ecr.us-west-2.amazonaws.com \
-      --docker-username=AWS \
-      --docker-password=$(aws ecr get-login-password --region $AWS_DEFAULT_REGION) \
-      --docker-email=salvatore.sorrentino@konghq.com
+kubectl apply -f https://raw.githubusercontent.com/metallb/metallb/v0.15.2/config/manifests/metallb-native.yaml
+kubectl get pods -n metallb-system
+kubectl apply -f metal-lb.yaml
 ```
