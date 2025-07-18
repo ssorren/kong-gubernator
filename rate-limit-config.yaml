@@ -38,10 +38,14 @@ services:
             limit: 1
             name: session-request-limit
             limit_type: REQUESTS
+            overrides:
+              - value: "dev:"
+                limit: 10
+                duration_seconds: 1
           - duration_seconds: 1
             header_name: department_id
             key_prefix: cdid
-            limit: 10
+            limit: 100
             name: department-request-limit
             limit_type: REQUESTS
   write_timeout: 60000

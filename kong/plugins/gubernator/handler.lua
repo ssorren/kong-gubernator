@@ -30,6 +30,45 @@ function helper:call_rate_limiter(throttle_requests)
     })
 end
 
+-- Function to find the best matching override for the header value.
+-- Prioritizes exact matches first.
+-- If no exact match, finds the longest prefix match.
+-- Assumes keys are prefixes for partial matches
+-- If multiple matches of the same length, returns the first one encountered after sorting by length descending.
+function helper:find_override(input, overrides)
+    if not overrides or #overrides == 0 then
+        return nil
+    end
+    -- First, check for exact match
+    for _, override in ipairs(overrides)
+    do
+        if override.value == input then
+            return override
+        end
+    end
+
+    -- No exact match, find longest prefix match
+    -- Sort keys by length descending
+    local sorted = {}
+    for _, override in ipairs(overrides)
+    do
+        table.insert(sorted, override)
+    end
+    table.sort(sorted, function(a, b) return #a.value > #b.value end)
+
+    -- Iterate through sorted keys to find the longest prefix
+    for _, override in ipairs(sorted)
+    do
+        local key = override.value
+        if #input >= #key and input:sub(1, #key) == key then
+            return override
+        end
+    end
+
+    -- No match found
+    return nil
+end
+
 function helper:async_call_rate_limiter(throttle_requests, timer)
     local function consume() 
         local res, err = helper:call_rate_limiter(throttle_requests)
@@ -61,7 +100,7 @@ function GubernatorHandler:access(conf)
     for i, res in ipairs(responses.responses)
     do
         if res.status == "OVER_LIMIT" or tonumber(res.remaining) < 1 then
-            kong.response.add_header("x-kong-limit-exceeded", throttle_requests.all[i].name)
+            kong.response.add_header("X-Kong-Limit-Exceeded", throttle_requests.all[i].name)
             return kong.response.exit(429)
         end
     end
@@ -111,13 +150,23 @@ function helper:get_throttle_requests(conf, hits)
         if not header_value then
             return nil
         end
+        
+        local limit = rule.limit
+        local duration_seconds = rule.duration_seconds
+
+        -- Check to see if there are overrides that match this request
+        local override = helper:find_override(header_value, rule.overrides)
+        if override then
+            limit = override.limit
+            duration_seconds = override.duration_seconds
+        end
 
         local req = {
             name = rule.name,
             unique_key = rule.key_prefix..":"..rule.limit_type..":"..header_value,
             hits = hits,
-            limit = rule.limit,
-            duration = rule.duration_seconds * 1000,
+            limit = limit,
+            duration = duration_seconds * 1000,
             behavior = 34,
         }
         table.insert(res.all, req)

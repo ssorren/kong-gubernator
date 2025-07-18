@@ -8,25 +8,19 @@ local schema = {
   name = PLUGIN_NAME,
   fields = {
     -- the 'fields' array is the top-level entry with fields defined by Kong
-    { consumer = typedefs.no_consumer },  -- this plugin cannot be configured on a consumer (typical for auth plugins)
+    { consumer = typedefs.no_consumer },  -- this plugin cannot be configured on a consumer
     { protocols = typedefs.protocols_http},
     { config = {
-        -- The 'config' record is the custom part of the plugin schema
         type = "record",
         fields = {
-          -- a standard defined field (typedef), with some customizations
-          { message = { -- self defined field
-              type = "string",
-              default = "gubernated",
-              required = false, }}, -- adding a constraint for the value
-          { global_limit = { -- self defined field
+          { global_limit = {
               type = "integer",
-              default = -1,
-              required = false, }}, -- adding a constraint for the value
-          { global_duration_seconds = { -- self defined field
+              default = -1, -- -1 == unlimited
+              required = false, }},
+          { global_duration_seconds = {
               type = "integer",
-              default = 1,
-              required = false, }}, -- adding a constraint for the value
+              default = 1, -- default of 1 second
+              required = false, }},
           { rules = {
             type = "array",
             elements = {
@@ -63,6 +57,32 @@ local schema = {
                             "TOKENS",
                         }
                     }},
+                    {overrides = {
+                        type = "array",
+                        elements = {
+                            type = "record",
+                            fields = {
+                                {desc = {
+                                    type = "string",
+                                    required = false,
+                                }},
+                                {value = {
+                                    type = "string",
+                                    required = true,
+                                }},
+                                {limit = {
+                                    type = "integer",
+                                    required = true,
+                                    default = -1, 
+                                }},
+                                {duration_seconds = {
+                                    type = "integer",
+                                    required = true,
+                                    default = 1,
+                                }},
+                            },
+                        },
+                    }},
                 },
             },
           }},
@@ -73,4 +93,4 @@ local schema = {
   },
 }
 
-return schema
+return schema                                    
