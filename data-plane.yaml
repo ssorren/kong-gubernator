@@ -25,7 +25,17 @@ spec:
    name: konnect-config1
    group: konnect.konghq.com
  deployment:
-   replicas: 3
+   scaling:
+     horizontal:
+       minReplicas: 3
+       maxReplicas: 10
+       metrics:
+       - type: Resource
+         resource:
+           name: cpu
+           target:
+             type: Utilization
+             averageUtilization: 50
    podTemplateSpec:
      spec:
        serviceAccountName: gubernator
@@ -45,8 +55,8 @@ spec:
              value: notice
            - name: KONG_PROXY_ACCESS_LOG
              value: "off"
-           - name: KONG_NGINX_WORKER_PROCESSES
-             value: "4"
+          #  - name: KONG_NGINX_WORKER_PROCESSES
+          #    value: "4"
            - name: KONG_PLUGINS
              value: "bundled,gubernator"
        initContainers:

@@ -30,7 +30,6 @@ services:
         config:
           global_duration_seconds: 1
           global_limit: -1
-          message: gubernated
           rules:
           - duration_seconds: 3
             header_name: session_id
