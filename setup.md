@@ -19,9 +19,9 @@ helm upgrade --install kgo kong/gateway-operator \
 ```
 
 You can check the Operator's logs with:
-
+ 0
 ```
-kubectl logs -f $(kubectl get pod -n kg-operator -o json | jq -r '.items[].metadata | select(.name | startswith("kgo-gateway"))' | jq -r '.name') -n kong-system
+kubectl logs -f $(kubectl get pod -n kg-operator -o json | jq -r '.items[].metadata | select(.name | startswith("kgo-gateway"))' | jq -r '.name') -n kg-operator
 ```
 
 And if you want to uninstall it run:
@@ -73,7 +73,6 @@ kubectl apply -f ./role-binding.yaml
 ```
 
 ```
-
 export CONTROL_PLANE_ID=$(curl -s -X GET "https://us.api.konghq.com/v2/control-planes?filter\[name\]=gubernator" -H "Authorization: Bearer ${PAT}" | jq -r '.data[0].id' )
 echo $CONTROL_PLANE_ID
 ```
@@ -116,7 +115,7 @@ deck gateway sync --konnect-control-plane-name gubernator --konnect-token $PAT r
 
 You can reset your Control Plane if you will:
 ```
-deck gateway reset --konnect-control-plane-name ai-gateway --konnect-token $PAT -f
+deck gateway reset --konnect-control-plane-name gubernator --konnect-token $PAT -f
 ```
 
 
