@@ -30,11 +30,25 @@ local schema = {
                         type = "string",
                         required = true,
                     }},
-                    {header_name = {
+                    {input_source = {
                         type = "string",
                         required = true,
+                        default = "HEADER",
+                        one_of = {
+                            "HEADER",
+                            "JWT_SUBJECT",
+                            "JWT_CLAIM",
+                            -- not yet implemented
+                            -- "CONSUMER", 
+                            -- "CONSUMER_GROUP",
+                        },
+
                     }},
-                    {key_prefix = {
+                    {input_key_name = {
+                        type = "string",
+                        required = false,
+                    }},
+                    {rate_limit_key_prefix = {
                         type = "string",
                         required = true,
                     }},
@@ -63,6 +77,25 @@ local schema = {
                             type = "record",
                             fields = {
                                 {desc = {
+                                    type = "string",
+                                    required = false,
+                                }},
+                                {input_source = {
+                                    type = "string",
+                                    required = true,
+                                    default = "INHERIT",
+                                    one_of = {
+                                        "INHERIT",
+                                        "HEADER",
+                                        "JWT_SUBJECT",
+                                        "JWT_CLAIM",
+                                        -- not yet implemented
+                                        -- "CONSUMER", 
+                                        -- "CONSUMER_GROUP",
+                                    },
+
+                                }},
+                                {input_key_name = {
                                     type = "string",
                                     required = false,
                                 }},

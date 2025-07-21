@@ -1,6 +1,7 @@
 local http  = require("resty.http")
 local cjson = require("cjson.safe")
 local timer = require("resty.timerng")
+local jwt = require "kong.plugins.jwt.jwt_parser"
 
 local GubernatorHandler = {
     PRIORITY = 910,
@@ -19,6 +20,20 @@ function helper:get_timer()
     return timer_sys
 end
 
+function helper:get_jwt_token()
+    local token = kong.request.get_header("Authorization")
+    if token then
+        local decoded_jwt, err = jwt:new(token:gsub("Bearer ", "", 1))
+        if err then
+            -- kong.response.exit(401, { message = "Invalid JWT" })
+            return nil
+        end
+        -- kong.response.add_header("X-Department", decoded_jwt.claims.department)
+        -- kong.response.add_header("X-Sub", decoded_jwt.claims.sub)
+        return decoded_jwt
+    end
+end
+
 function helper:call_rate_limiter(throttle_requests)    
     local hits =  cjson.encode({requests = throttle_requests})
     return http.new():request_uri("http://localhost:1050/v1/GetRateLimits", {
@@ -35,14 +50,15 @@ end
 -- If no exact match, finds the longest prefix match.
 -- Assumes keys are prefixes for partial matches
 -- If multiple matches of the same length, returns the first one encountered after sorting by length descending.
-function helper:find_override(input, overrides)
+function helper:find_override(input, overrides, token)
     if not overrides or #overrides == 0 then
         return nil
     end
     -- First, check for exact match
     for _, override in ipairs(overrides)
     do
-        if override.value == input then
+        local input_value = helper:override_input_value(input, override, token)
+        if input_value and override.value == input_value then
             return override
         end
     end
@@ -59,8 +75,9 @@ function helper:find_override(input, overrides)
     -- Iterate through sorted keys to find the longest prefix
     for _, override in ipairs(sorted)
     do
+        local input_value = helper:override_input_value(input, override, token)
         local key = override.value
-        if #input >= #key and input:sub(1, #key) == key then
+        if input_value and #input_value >= #key and input_value:sub(1, #key) == key then
             return override
         end
     end
@@ -83,7 +100,7 @@ function helper:async_call_rate_limiter(throttle_requests, timer)
 end
 
 function GubernatorHandler:access(conf)
-    local throttle_requests = helper:get_throttle_requests(conf, 0)
+    local throttle_requests = helper:get_throttle_requests(conf, helper:get_jwt_token(), 0)
     if not throttle_requests then
         return kong.response.exit(400)
     end
@@ -113,6 +130,7 @@ function GubernatorHandler:access(conf)
 end
 
 function GubernatorHandler:body_filter(conf)
+    
     local status = kong.response.get_status()
     if not status or status < 200 or status >= 300 then
         return
@@ -129,7 +147,7 @@ function GubernatorHandler:body_filter(conf)
     end
 
     if body_table.usage and body_table.usage.completion_tokens then
-        local throttle_requests = helper:get_throttle_requests(conf, body_table.usage.completion_tokens)
+        local throttle_requests = helper:get_throttle_requests(conf, helper:get_jwt_token(), body_table.usage.completion_tokens)
         if not throttle_requests or #throttle_requests.by_token == 0 then
             return
         end
@@ -138,7 +156,41 @@ function GubernatorHandler:body_filter(conf)
     end
 end
 
-function helper:get_throttle_requests(conf, hits)
+function helper:override_input_value(input, override, token)
+    if override.input_source == "INHERIT" then
+        return input
+    end
+
+    if override.input_source == "HEADER" then
+        return kong.request.get_header(rule.input_key_name)
+    end
+
+    if override.input_source == "JWT_SUBJECT" then
+        return token.claims.sub
+    end
+
+    if override.input_source == "JWT_CLAIM" then
+        return token.claims[override.input_key_name]
+    end
+    return nil
+end
+
+function helper:input_value(rule, token)
+    if rule.input_source == "HEADER" then
+        return kong.request.get_header(rule.input_key_name)
+    end
+    if not token then
+        kong.response.exit(401, { message = "Invalid JWT" })
+    end
+    if rule.input_source == "JWT_SUBJECT" then
+        return token.claims.sub
+    end
+    if rule.input_source == "JWT_CLAIM" then
+        return token.claims[rule.input_key_name]
+    end
+end
+
+function helper:get_throttle_requests(conf, token, hits)
     local res = {
         by_request = {},
         by_token = {},
@@ -146,8 +198,8 @@ function helper:get_throttle_requests(conf, hits)
     }
     for _, rule in ipairs(conf.rules)
     do
-        local header_value = kong.request.get_header(rule.header_name)
-        if not header_value then
+        local input_value = helper:input_value(rule, token)
+        if not input_value then
             return nil
         end
         
@@ -155,7 +207,7 @@ function helper:get_throttle_requests(conf, hits)
         local duration_seconds = rule.duration_seconds
 
         -- Check to see if there are overrides that match this request
-        local override = helper:find_override(header_value, rule.overrides)
+        local override = helper:find_override(input_value, rule.overrides, token)
         if override then
             limit = override.limit
             duration_seconds = override.duration_seconds
@@ -163,7 +215,7 @@ function helper:get_throttle_requests(conf, hits)
 
         local req = {
             name = rule.name,
-            unique_key = rule.key_prefix..":"..rule.limit_type..":"..header_value,
+            unique_key = rule.rate_limit_key_prefix..":"..rule.limit_type..":"..input_value,
             hits = hits,
             limit = limit,
             duration = duration_seconds * 1000,

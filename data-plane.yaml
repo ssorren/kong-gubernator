@@ -27,7 +27,7 @@ spec:
  deployment:
    scaling:
      horizontal:
-       minReplicas: 3
+       minReplicas: 1
        maxReplicas: 10
        metrics:
        - type: Resource
@@ -41,8 +41,8 @@ spec:
        serviceAccountName: gubernator
        containers:
        - name: proxy
-         image: sal1103/kong-gubernated:3.11.1
-         imagePullPolicy: IfNotPresent
+         image: sal1103/kong-gubernated:3.11.2
+         imagePullPolicy: Always
          resources:
            requests:
              cpu: "0.1"

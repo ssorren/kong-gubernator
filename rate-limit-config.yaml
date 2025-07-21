@@ -26,25 +26,33 @@ services:
     response_buffering: true
     strip_path: true
     plugins:
-      - name: gubernator
-        config:
-          global_duration_seconds: 1
-          global_limit: -1
-          rules:
-          - duration_seconds: 3
-            header_name: session_id
-            key_prefix: csid
-            limit: 1
-            name: session-request-limit
-            limit_type: REQUESTS
-            overrides:
-              - value: "dev:"
-                limit: 10
-                duration_seconds: 1
-          - duration_seconds: 1
-            header_name: department_id
-            key_prefix: cdid
-            limit: 100
-            name: department-request-limit
-            limit_type: REQUESTS
+    - name: gubernator
+      config:
+        global_duration_seconds: 1
+        global_limit: -1
+        rules:
+        - duration_seconds: 3
+          input_source: JWT_SUBJECT
+          rate_limit_key_prefix: csub
+          limit: 1
+          name: session-request-limit
+          limit_type: REQUESTS
+          overrides:
+          - input_source: JWT_CLAIM
+            input_key_name: department
+            value: "engineering"
+            limit: 10
+            duration_seconds: 1
+          - input_source: JWT_CLAIM
+            input_key_name: department
+            value: "sales"
+            limit: 0
+            duration_seconds: 1
+        - duration_seconds: 1
+          input_source: JWT_CLAIM
+          input_key_name: department
+          rate_limit_key_prefix: cdid
+          limit: 100
+          name: department-request-limit
+          limit_type: REQUESTS
   write_timeout: 60000
