@@ -13,10 +13,10 @@ spec:
 kind: KonnectGatewayControlPlane
 apiVersion: konnect.konghq.com/v1alpha1
 metadata:
- name: gubernator
- namespace: kong
+  name: gubernator
+  namespace: kong
 spec:
- name: gubernator
- konnect:
-   authRef:
-     name: konnect-api-auth-conf
+  name: gubernator
+  konnect:
+    authRef:
+      name: konnect-api-auth-conf

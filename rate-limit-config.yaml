@@ -2,57 +2,57 @@ _format_version: "3.0"
 _konnect:
   control_plane_name: gubernator
 services:
-- connect_timeout: 60000
-  enabled: true
-  host: httpbin.konghq.com
-  name: httpbin-service
-  path: /get
-  port: 443
-  protocol: https
-  read_timeout: 60000
-  retries: 5
-  routes:
-  - https_redirect_status_code: 426
-    name: httpbin-route
-    path_handling: v0
-    paths:
-    - /anything
-    preserve_host: false
-    protocols:
-    - http
-    - https
-    regex_priority: 0
-    request_buffering: true
-    response_buffering: true
-    strip_path: true
-    plugins:
-    - name: gubernator
-      config:
-        global_duration_seconds: 1
-        global_limit: -1
-        rules:
-        - duration_seconds: 3
-          input_source: JWT_SUBJECT
-          rate_limit_key_prefix: csub
-          limit: 1
-          name: session-request-limit
-          limit_type: REQUESTS
-          overrides:
-          - input_source: JWT_CLAIM
-            input_key_name: department
-            match_expr: "engineering"
-            limit: 10
-            duration_seconds: 1
-          - input_source: JWT_CLAIM
-            input_key_name: department
-            match_expr: "sales"
-            limit: 0
-            duration_seconds: 1
-        - duration_seconds: 1
-          input_source: JWT_CLAIM
-          input_key_name: department
-          rate_limit_key_prefix: cdid
-          limit: 100
-          name: department-request-limit
-          limit_type: REQUESTS
-  write_timeout: 60000
+  - connect_timeout: 60000
+    enabled: true
+    host: httpbin.konghq.com
+    name: httpbin-service
+    path: /get
+    port: 443
+    protocol: https
+    read_timeout: 60000
+    retries: 5
+    routes:
+      - https_redirect_status_code: 426
+        name: httpbin-route
+        path_handling: v0
+        paths:
+          - /anything
+        preserve_host: false
+        protocols:
+          - http
+          - https
+        regex_priority: 0
+        request_buffering: true
+        response_buffering: true
+        strip_path: true
+        plugins:
+          - name: gubernator
+            config:
+              global_duration_seconds: 1
+              global_limit: -1
+              rules:
+                - duration_seconds: 3
+                  input_source: JWT_SUBJECT
+                  rate_limit_key_prefix: csub
+                  limit: 1
+                  name: session-request-limit
+                  limit_type: REQUESTS
+                  overrides:
+                    - input_source: JWT_CLAIM
+                      input_key_name: department
+                      match_expr: "engineering"
+                      limit: 10
+                      duration_seconds: 1
+                    - input_source: JWT_CLAIM
+                      input_key_name: department
+                      match_expr: "sales"
+                      limit: 0
+                      duration_seconds: 1
+                - duration_seconds: 1
+                  input_source: JWT_CLAIM
+                  input_key_name: department
+                  rate_limit_key_prefix: cdid
+                  limit: 100
+                  name: department-request-limit
+                  limit_type: REQUESTS
+    write_timeout: 60000

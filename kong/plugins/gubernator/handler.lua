@@ -1,23 +1,22 @@
-local http  = require("resty.http")
-local cjson = require("cjson.safe")
-local timer = require("resty.timerng")
-local jwt = require "kong.plugins.jwt.jwt_parser"
+local http              = require("resty.http")
+local cjson             = require("cjson.safe")
+local timer             = require("resty.timerng")
+local jwt               = require "kong.plugins.jwt.jwt_parser"
 
 local GubernatorHandler = {
     PRIORITY = 910,
     VERSION = "0.0.1",
 }
 
-local helper = {}
-local timer_sys
+local helper            = {}
+local request_timer
 
-
-function helper:get_timer()
-    if timer_sys == nil then
-        timer_sys = timer.new({})
-        timer_sys:start()
+function GubernatorHandler:init_worker()
+    if request_timer == nil then
+        request_timer = timer.new({})
+        request_timer:start()
     end
-    return timer_sys
+    return true
 end
 
 function helper:get_jwt_token()
@@ -34,9 +33,10 @@ function helper:get_jwt_token()
     end
 end
 
-function helper:call_rate_limiter(conf, throttle_requests)    
-    local hits =  cjson.encode({requests = throttle_requests})
-    local url = conf.gubernator_protocol.."://"..conf.gubernator_host..":"..conf.gubernator_port.."/v1/GetRateLimits"
+function helper:call_rate_limiter(conf, throttle_requests)
+    local hits = cjson.encode({ requests = throttle_requests })
+    local url = conf.gubernator_protocol .. "://" .. conf.gubernator_host ..
+    ":" .. conf.gubernator_port .. "/v1/GetRateLimits"
     return http.new():request_uri(url, {
         method = "POST",
         body = hits,
@@ -93,13 +93,13 @@ function helper:find_override(input, overrides, token)
 end
 
 function helper:async_call_rate_limiter(conf, throttle_requests)
-    local function consume() 
+    local function consume()
         local _, err = helper:call_rate_limiter(conf, throttle_requests)
         if err then
             kong.log("Error consuming throttle requests: ", err)
         end
     end
-    local _, err = helper:get_timer():at(0.01, consume)
+    local _, err = request_timer:at(0.01, consume)
     if err then
         kong.log("Error scheduling requests: ", err)
     end
@@ -136,7 +136,6 @@ function GubernatorHandler:access(conf)
 end
 
 function GubernatorHandler:body_filter(conf)
-    
     local status = kong.response.get_status()
     if not status or status < 200 or status >= 300 then
         return
@@ -153,7 +152,8 @@ function GubernatorHandler:body_filter(conf)
     end
 
     if body_table.usage and body_table.usage.completion_tokens then
-        local throttle_requests = helper:get_throttle_requests(conf, helper:get_jwt_token(), body_table.usage.completion_tokens)
+        local throttle_requests = helper:get_throttle_requests(conf, helper:get_jwt_token(),
+            body_table.usage.completion_tokens)
         if not throttle_requests or #throttle_requests.by_token == 0 then
             return
         end
@@ -208,7 +208,7 @@ function helper:get_throttle_requests(conf, token, hits)
         if not input_value then
             return nil
         end
-        
+
         local limit = rule.limit
         local duration_seconds = rule.duration_seconds
 
@@ -221,7 +221,7 @@ function helper:get_throttle_requests(conf, token, hits)
 
         local req = {
             name = rule.name,
-            unique_key = rule.rate_limit_key_prefix..":"..rule.limit_type..":"..input_value,
+            unique_key = rule.rate_limit_key_prefix .. ":" .. rule.limit_type .. ":" .. input_value,
             hits = hits,
             limit = limit,
             duration = duration_seconds * 1000,
@@ -238,5 +238,4 @@ function helper:get_throttle_requests(conf, token, hits)
     return res
 end
 
-   
 return GubernatorHandler
