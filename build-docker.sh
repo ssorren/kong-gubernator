@@ -1,3 +1,5 @@
-docker buildx build --platform linux/amd64,linux/arm64 --no-cache -t kong-gubernated:3.11.2 . 
-docker buildx build --platform linux/amd64,linux/arm64 --no-cache -t sal1103/kong-gubernated:3.11.2 . 
-docker push sal1103/kong-gubernated:3.11.2
+docker buildx build --platform linux/amd64,linux/arm64 -t kong-gubernated:1.0.0 . 
+docker buildx build --platform linux/amd64,linux/arm64 -t sal1103/kong-gubernated:1.0.0 . 
+docker buildx build --platform linux/amd64,linux/arm64 -t sal1103/kong-gubernated:latest . 
+docker push sal1103/kong-gubernated:1.0.0
+docker push sal1103/kong-gubernated:latest

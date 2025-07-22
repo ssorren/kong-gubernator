@@ -34,9 +34,10 @@ function helper:get_jwt_token()
     end
 end
 
-function helper:call_rate_limiter(throttle_requests)    
+function helper:call_rate_limiter(conf, throttle_requests)    
     local hits =  cjson.encode({requests = throttle_requests})
-    return http.new():request_uri("http://localhost:1050/v1/GetRateLimits", {
+    local url = conf.gubernator_protocol.."://"..conf.gubernator_host..":"..conf.gubernator_port.."/v1/GetRateLimits"
+    return http.new():request_uri(url, {
         method = "POST",
         body = hits,
         headers = {
@@ -58,25 +59,30 @@ function helper:find_override(input, overrides, token)
     for _, override in ipairs(overrides)
     do
         local input_value = helper:override_input_value(input, override, token)
-        if input_value and override.value == input_value then
+        if input_value and override.match_expr == input_value then
             return override
         end
     end
-
     -- No exact match, find longest prefix match
     -- Sort keys by length descending
     local sorted = {}
     for _, override in ipairs(overrides)
     do
-        table.insert(sorted, override)
+        if override.match_type == "PREFIX" then
+            table.insert(sorted, override)
+        end
     end
-    table.sort(sorted, function(a, b) return #a.value > #b.value end)
+    if #sorted == 0 then
+        return nil -- no prefix matchers available, safe ot return
+    end
+
+    table.sort(sorted, function(a, b) return #a.match > #b.match end)
 
     -- Iterate through sorted keys to find the longest prefix
     for _, override in ipairs(sorted)
     do
         local input_value = helper:override_input_value(input, override, token)
-        local key = override.value
+        local key = override.match_expr
         if input_value and #input_value >= #key and input_value:sub(1, #key) == key then
             return override
         end
@@ -86,14 +92,14 @@ function helper:find_override(input, overrides, token)
     return nil
 end
 
-function helper:async_call_rate_limiter(throttle_requests, timer)
+function helper:async_call_rate_limiter(conf, throttle_requests)
     local function consume() 
-        local res, err = helper:call_rate_limiter(throttle_requests)
+        local _, err = helper:call_rate_limiter(conf, throttle_requests)
         if err then
             kong.log("Error consuming throttle requests: ", err)
         end
     end
-    local name, err = helper:get_timer():at(0.1, consume)
+    local _, err = helper:get_timer():at(0.01, consume)
     if err then
         kong.log("Error scheduling requests: ", err)
     end
@@ -104,7 +110,7 @@ function GubernatorHandler:access(conf)
     if not throttle_requests then
         return kong.response.exit(400)
     end
-    local res, err = helper:call_rate_limiter(throttle_requests.all)
+    local res, err = helper:call_rate_limiter(conf, throttle_requests.all)
     if err then
         kong.log("Error calling gubernator: ", err)
         return
@@ -126,7 +132,7 @@ function GubernatorHandler:access(conf)
         rule.hits = "1"
     end
 
-    helper:async_call_rate_limiter(throttle_requests.by_request)
+    helper:async_call_rate_limiter(conf, throttle_requests.by_request)
 end
 
 function GubernatorHandler:body_filter(conf)
@@ -151,7 +157,7 @@ function GubernatorHandler:body_filter(conf)
         if not throttle_requests or #throttle_requests.by_token == 0 then
             return
         end
-        helper:async_call_rate_limiter(throttle_requests.by_token)
+        helper:async_call_rate_limiter(conf, throttle_requests.by_token)
         kong.log("response ctx:", cjson.encode(kong.ctx))
     end
 end
@@ -162,7 +168,7 @@ function helper:override_input_value(input, override, token)
     end
 
     if override.input_source == "HEADER" then
-        return kong.request.get_header(rule.input_key_name)
+        return kong.request.get_header(override.input_key_name)
     end
 
     if override.input_source == "JWT_SUBJECT" then

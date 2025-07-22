@@ -13,6 +13,18 @@ local schema = {
     { config = {
         type = "record",
         fields = {
+          { gubernator_protocol = {
+              type = "string",
+              default = "http",
+              required = false, }},
+          { gubernator_host = {
+              type = "string",
+              default = "localhost",
+              required = false, }},
+          { gubernator_port = {
+              type = "string",
+              default = "1050",
+              required = false, }},
           { global_limit = {
               type = "integer",
               default = -1, -- -1 == unlimited
@@ -99,7 +111,16 @@ local schema = {
                                     type = "string",
                                     required = false,
                                 }},
-                                {value = {
+                                {match_type = {
+                                    type = "string",
+                                    required = true,
+                                    default = "EXACT_MATCH",
+                                    one_of = {
+                                        "PREFIX",
+                                        "EXACT_MATCH",
+                                    },
+                                }},
+                                {match_expr = {
                                     type = "string",
                                     required = true,
                                 }},

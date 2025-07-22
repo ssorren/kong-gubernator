@@ -16,6 +16,7 @@ helm upgrade --install kgo kong/gateway-operator \
   --set image.tag=1.6 \
   --set kubernetes-configuration-crds.enabled=true \
   --set env.ENABLE_CONTROLLER_KONNECT=true
+  --set env.VALIDATE_IMAGES=false
 ```
 
 You can check the Operator's logs with:
@@ -73,7 +74,7 @@ kubectl apply -f ./role-binding.yaml
 ```
 
 ```
-export CONTROL_PLANE_ID=$(curl -s -X GET "https://us.api.konghq.com/v2/control-planes?filter\[name\]=gubernator" -H "Authorization: Bearer ${PAT}" | jq -r '.data[0].id' )
+export CONTROL_PLANE_ID=$(curl -s -X GET "https://us.api.konghq.com/v2/control-planes?filter\[name\]=<your control plane name>" -H "Authorization: Bearer ${PAT}" | jq -r '.data[0].id' )
 echo $CONTROL_PLANE_ID
 ```
 
@@ -83,8 +84,14 @@ curl -i -X POST \
   --header "Content-Type: application/json" \
   --header "Authorization: Bearer ${PAT}" \
   --data "{
-    \"lua_schema\": $(jq -Rs '.' ./kong/plugins/gubernator/schema.lua)
+    \"lua_schema\": $(jq -Rs '.' ./kong/plugins/<your plugin name>/schema.lua)
   }"
+```
+
+```
+curl -i -X DELETE \
+  "https://us.api.konghq.com/v2/control-planes/${CONTROL_PLANE_ID}/core-entities/plugin-schemas/gubernator" \
+  --header "Authorization: Bearer ${PAT}"
 ```
 
 ### Kong Konnect Data Plane
