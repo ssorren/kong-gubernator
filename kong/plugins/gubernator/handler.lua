@@ -2,6 +2,8 @@ local http              = require("resty.http")
 local cjson             = require("cjson.safe")
 local timer             = require("resty.timerng")
 local jwt               = require "kong.plugins.jwt.jwt_parser"
+local sha1 = require "resty.sha1"
+local to_hex = require "resty.string".to_hex
 
 local GubernatorHandler = {
     PRIORITY = 910,
@@ -10,6 +12,13 @@ local GubernatorHandler = {
 
 local helper            = {}
 local request_timer
+
+
+local function hash(key)
+    local digest = sha1:new()
+    digest:update(key)
+    return to_hex(digest:final())
+end
 
 function GubernatorHandler:init_worker()
     if request_timer == nil then
@@ -274,10 +283,10 @@ function helper:get_throttle_requests(conf, token, hits)
             limit = override.limit
             duration_seconds = override.duration_seconds
         end
-
+        
         local req = {
             name = rule.name,
-            unique_key = rule.rate_limit_key_prefix .. ":" .. rule.limit_type .. ":" .. input_value,
+            unique_key = rule.rate_limit_key_prefix .. ":" .. rule.limit_type .. ":" .. hash(input_value),
             hits = hits,
             limit = limit,
             duration = duration_seconds * 1000,
