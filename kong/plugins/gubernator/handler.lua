@@ -19,110 +19,25 @@ function GubernatorHandler:init_worker()
     return true
 end
 
-function helper:get_jwt_token()
-    local token = kong.request.get_header("Authorization")
-    if token then
-        local decoded_jwt, err = jwt:new(token:gsub("Bearer ", "", 1))
-        if err then
-            -- kong.response.exit(401, { message = "Invalid JWT" })
-            return nil
-        end
-        -- kong.response.add_header("X-Department", decoded_jwt.claims.department)
-        -- kong.response.add_header("X-Sub", decoded_jwt.claims.sub)
-        return decoded_jwt
-    end
-end
-
-function helper:call_rate_limiter(conf, throttle_requests)
-    local hits = cjson.encode({ requests = throttle_requests })
-    local url = conf.gubernator_protocol .. "://" .. conf.gubernator_host ..
-    ":" .. conf.gubernator_port .. "/v1/GetRateLimits"
-    return http.new():request_uri(url, {
-        method = "POST",
-        body = hits,
-        headers = {
-            ["Content-Type"] = "application/json",
-        },
-    })
-end
-
--- Function to find the best matching override for the header value.
--- Prioritizes exact matches first.
--- If no exact match, finds the longest prefix match.
--- Assumes keys are prefixes for partial matches
--- If multiple matches of the same length, returns the first one encountered after sorting by length descending.
-function helper:find_override(input, overrides, token)
-    if not overrides or #overrides == 0 then
-        return nil
-    end
-    -- First, check for exact match
-    for _, override in ipairs(overrides)
-    do
-        local input_value = helper:override_input_value(input, override, token)
-        if input_value and override.match_expr == input_value then
-            return override
-        end
-    end
-    -- No exact match, find longest prefix match
-    -- Sort keys by length descending
-    local sorted = {}
-    for _, override in ipairs(overrides)
-    do
-        if override.match_type == "PREFIX" then
-            table.insert(sorted, override)
-        end
-    end
-    if #sorted == 0 then
-        return nil -- no prefix matchers available, safe ot return
-    end
-
-    table.sort(sorted, function(a, b) return #a.match > #b.match end)
-
-    -- Iterate through sorted keys to find the longest prefix
-    for _, override in ipairs(sorted)
-    do
-        local input_value = helper:override_input_value(input, override, token)
-        local key = override.match_expr
-        if input_value and #input_value >= #key and input_value:sub(1, #key) == key then
-            return override
-        end
-    end
-
-    -- No match found
-    return nil
-end
-
-function helper:async_call_rate_limiter(conf, throttle_requests)
-    local function consume()
-        local _, err = helper:call_rate_limiter(conf, throttle_requests)
-        if err then
-            kong.log("Error consuming throttle requests: ", err)
-        end
-    end
-    local _, err = request_timer:at(0.01, consume)
-    if err then
-        kong.log("Error scheduling requests: ", err)
-    end
-end
-
 function GubernatorHandler:access(conf)
     local throttle_requests = helper:get_throttle_requests(conf, helper:get_jwt_token(), 0)
     if not throttle_requests then
         return kong.response.exit(400)
     end
-    local res, err = helper:call_rate_limiter(conf, throttle_requests.all)
+    local result, err = helper:call_rate_limiter(conf, throttle_requests.all)
     if err then
         kong.log("Error calling gubernator: ", err)
         return
     end
-    local responses, err = cjson.decode(res.body)
-    if err then
+    local body, err2 = cjson.decode(result.body)
+    if err2 then
         kong.log("Error parsing gubernator response: ", err)
         return
     end
-    for i, res in ipairs(responses.responses)
+
+    for i, response in ipairs(body.responses)
     do
-        if res.status == "OVER_LIMIT" or tonumber(res.remaining) < 1 then
+        if response.status == "OVER_LIMIT" or tonumber(response.remaining) < 1 then
             kong.response.add_header("X-Kong-Limit-Exceeded", throttle_requests.all[i].name)
             return kong.response.exit(429)
         end
@@ -162,6 +77,141 @@ function GubernatorHandler:body_filter(conf)
     end
 end
 
+function helper:ensure_list(value)
+    if not value then
+        return value
+    end
+    if type(value) == "table" then
+        return value
+    end
+    return { value }
+end
+
+function helper:get_jwt_token()
+    local token = kong.request.get_header("Authorization")
+    if token then
+        local decoded_jwt, err = jwt:new(token:gsub("Bearer ", "", 1))
+        if err then
+            -- kong.response.exit(401, { message = "Invalid JWT" })
+            return nil
+        end
+        return decoded_jwt
+    end
+end
+
+function helper:call_rate_limiter(conf, throttle_requests)
+    local hits = cjson.encode({ requests = throttle_requests })
+    local url = conf.gubernator_protocol .. "://" .. conf.gubernator_host ..
+        ":" .. conf.gubernator_port .. "/v1/GetRateLimits"
+    return http.new():request_uri(url, {
+        method = "POST",
+        body = hits,
+        headers = {
+            ["Content-Type"] = "application/json",
+        },
+    })
+end
+
+function helper:async_call_rate_limiter(conf, throttle_requests)
+    local function consume()
+        local _, err = helper:call_rate_limiter(conf, throttle_requests)
+        if err then
+            kong.log("Error consuming throttle requests: ", err)
+        end
+    end
+    local _, err = request_timer:at(0.01, consume)
+    if err then
+        kong.log("Error scheduling requests: ", err)
+    end
+end
+
+local function sort_overrides(a, b)
+    -- we're prioritizing high throughput in overrides
+    return (a.limit / a.duration_seconds) > (b.limit / b.duration_seconds)
+end
+
+
+function helper:find_override_exact_matches(input, overrides, token)
+    local matches = {}
+    for _, override in ipairs(overrides)
+    do
+        local input_values = helper:ensure_list(helper:override_input_value(input, override, token))
+        if not input_values or #input_values == 0 then
+            goto continue
+        end
+        for _, override_input in ipairs(input_values)
+        do
+            if override_input and override.match_expr == override_input then
+                table.insert(matches, override)
+            end
+        end
+        ::continue::
+    end
+
+    if #matches > 0 then
+        table.sort(matches, sort_overrides)
+        return matches[1]
+    end
+    return nil
+end
+
+function helper:find_prefix_match(input, overrides, token)
+    local sorted = {}
+    for _, override in ipairs(overrides)
+    do
+        if override.match_type == "PREFIX" then
+            table.insert(sorted, override)
+        end
+    end
+    if #sorted == 0 then
+        return nil -- no prefix matchers available, safe ot return
+    end
+    table.sort(sorted, function(a, b) return #a.match > #b.match end)
+
+    local prefix_matches = {}
+    -- Iterate through sorted keys to find the longest prefix
+    for _, override in ipairs(sorted)
+    do
+        local input_values = helper:ensure_list(helper:override_input_value(input, override, token))
+        local key = override.match_expr
+        for _, input_value in ipairs(input_values)
+        do
+            if input_value and #input_value >= #key and input_value:sub(1, #key) == key then
+                table.insert(prefix_matches, override)
+                break
+            end
+        end
+    end
+    if #prefix_matches == 0 then
+        return nil
+    end
+    table.sort(prefix_matches, sort_overrides)
+    return prefix_matches[1]
+end
+
+-- Function to find the best matching override for the header value.
+-- Prioritizes exact matches first.
+-- If no exact match, finds the longest prefix match.
+-- Assumes keys are prefixes for partial matches
+-- If multiple matches of the same length, returns the first one encountered after sorting by length descending.
+-- if input defined has multiple values (i.e. multiple role claims), and there are multiple overrides that match,
+-- the override with the most throughput is returned
+function helper:find_override(input, overrides, token)
+    if not overrides or #overrides == 0 then
+        return nil
+    end
+
+    if type(input) == "string" then
+        input = { input }
+    end
+    local exact_match = helper:find_override_exact_matches(input, overrides, token)
+    if exact_match then
+        return exact_match
+    end
+    -- No exact match, find longest prefix match
+    return helper:find_prefix_match(input, overrides, token)
+end
+
 function helper:override_input_value(input, override, token)
     if override.input_source == "INHERIT" then
         return input
@@ -181,7 +231,7 @@ function helper:override_input_value(input, override, token)
     return nil
 end
 
-function helper:input_value(rule, token)
+function helper:rule_input_value(rule, token)
     if rule.input_source == "HEADER" then
         return kong.request.get_header(rule.input_key_name)
     end
@@ -204,10 +254,16 @@ function helper:get_throttle_requests(conf, token, hits)
     }
     for _, rule in ipairs(conf.rules)
     do
-        local input_value = helper:input_value(rule, token)
-        if not input_value then
+        local input_value = helper:rule_input_value(rule, token)
+        -- it is possible that input is a list (multiple values for a claim etc.).
+        -- if so, we'll just grab the first in the list for now. we may want to come up with more deterministic behavior
+        if input_value and type(input_value) == "table" and #input_value > 0 then
+            input_value = input_value[1]
+        end
+        if not input_value or #input_value == 0 then
             return nil
         end
+
 
         local limit = rule.limit
         local duration_seconds = rule.duration_seconds
