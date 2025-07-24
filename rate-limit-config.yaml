@@ -37,6 +37,8 @@ services:
                   limit: 1
                   name: session-request-limit
                   limit_type: REQUESTS
+                  methods:
+                    - GET
                   overrides:
                     - input_source: JWT_CLAIM
                       input_key_name: department
@@ -60,4 +62,6 @@ services:
                   limit: 100
                   name: department-request-limit
                   limit_type: REQUESTS
+                  methods:
+                    - GET
     write_timeout: 60000

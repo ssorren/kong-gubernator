@@ -66,9 +66,8 @@ return {
                             "HEADER",
                             "JWT_SUBJECT",
                             "JWT_CLAIM",
-                            -- not yet implemented
-                            -- "CONSUMER", 
-                            -- "CONSUMER_GROUP",
+                            "CONSUMER_ID",
+                            "CONSUMER_GROUP_NAME",
                         },
 
                     }},
@@ -117,9 +116,8 @@ return {
                                         "HEADER",
                                         "JWT_SUBJECT",
                                         "JWT_CLAIM",
-                                        -- not yet implemented
-                                        -- "CONSUMER", 
-                                        -- "CONSUMER_GROUP",
+                                        "CONSUMER_ID", 
+                                        "CONSUMER_GROUP_NAME",
                                     },
 
                                 }},

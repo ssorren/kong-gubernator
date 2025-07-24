@@ -254,32 +254,47 @@ function helper:find_override(input, overrides, token)
     return helper:find_override_prefix_match(input, overrides, token)
 end
 
+local input_retriever = {
+    ["INHERIT"] = function(input, rule, token) return input end,
+    ["CONSUMER_ID"] = function(input, rule, token)
+        local consumer = kong.client.get_consumer()
+        if consumer then
+            return consumer.id
+        else
+            return nil
+        end
+    end,
+    ["HEADER"] = function(input, rule, token) return kong.request.get_header(rule.input_key_name) end,
+    ["CONSUMER_GROUP_NAME"] = function(input, rule, token) 
+        local groups = kong.client.get_consumer_groups()
+        if groups and #groups then
+            local names = kong.table(#groups)
+            for i, g in ipairs(groups) do
+                table.insert(names, i, g.name)
+            end
+        end
+        return nil
+    end,
+    ["JWT_SUBJECT"] = function(input, rule, token) 
+        if token then
+            return token.claims.sub
+        end
+        return nil
+     end,
+    ["JWT_CLAIM"] = function(input, rule, token)
+        if token then
+            return token.claims[rule.input_key_name]
+        end
+        return nil
+    end,
+}
+
 function helper:override_input_value(input, override, token)
-    if override.input_source == "INHERIT" then
-        return input
-    elseif override.input_source == "HEADER" then
-        return kong.request.get_header(override.input_key_name)
-    elseif token and override.input_source == "JWT_SUBJECT" then
-        return token.claims.sub
-    elseif token and override.input_source == "JWT_CLAIM" then
-        return token.claims[override.input_key_name]
-    end
-    return nil
+    return input_retriever[override.input_source](input, override, token)
 end
 
 function helper:rule_input_value(rule, token)
-    if rule.input_source == "HEADER" then
-        return kong.request.get_header(rule.input_key_name)
-    end
-    if not token then
-        kong.response.exit(401, { message = "Invalid JWT" })
-        return
-    end
-    if rule.input_source == "JWT_SUBJECT" then
-        return token.claims.sub
-    elseif rule.input_source == "JWT_CLAIM" then
-        return token.claims[rule.input_key_name]
-    end
+    return input_retriever[rule.input_source](nil, rule, token)
 end
 
 local function has_request_method(rule, request_method)
