@@ -50,6 +50,18 @@ function GubernatorHandler:init_worker()
     return true
 end
 
+function GubernatorHandler:configure(configs)
+    for _, config in ipairs(configs) do
+        for _, rule in ipairs(config.rules) do
+            if rule.overrides then
+                table.sort(rule.overrides, sort_overrides)
+            end
+        end
+    end
+    
+    return true
+end
+
 function GubernatorHandler:access(conf)
     local throttle_requests = helper:get_throttle_requests(conf, helper:get_jwt_token(), 0)
     if not throttle_requests then
@@ -166,92 +178,31 @@ function helper:async_call_rate_limiter(conf, throttle_requests)
     end
 end
 
-function helper:find_override_exact_match(input, overrides, token)
-    local matches = {}
-    for _, override in ipairs(overrides)
-    do
-        local input_values = ensure_list(helper:override_input_value(input, override, token))
-        if input_values and #input_values > 0 then
-            for _, override_input in ipairs(input_values)
-            do
-                if override_input and override.match_expr == override_input then
-                    table.insert(matches, override)
-                end
-            end
-        end
-    end
-
-    if #matches > 0 then
-        table.sort(matches, sort_overrides)
-        return matches[1]
-    end
-    return nil
-end
-
-function helper:find_override_prefix_match(input, overrides, token)
-    local sorted = helper:prefix_type_overrides(overrides)
-    if #sorted == 0 then
-        return nil -- no prefix matchers available, safe ot return
-    end
-    local prefix_matches = {}
-    -- Iterate through sorted keys to find the longest prefix
-    for _, override in ipairs(sorted)
-    do
-        local input_values = ensure_list(helper:override_input_value(input, override, token))
-        if helper:has_prefix_match(override.match_expr, input_values) then
-            table.insert(prefix_matches, override)
-        end
-    end
-
-    if #prefix_matches == 0 then
-        return nil
-    end
-    table.sort(prefix_matches, sort_overrides)
-    return prefix_matches[1]
-end
-
-function helper:prefix_type_overrides(overrides)
-    local sorted = {}
-    for _, override in ipairs(overrides)
-    do
-        if override.match_type == "PREFIX" then
-            table.insert(sorted, override)
-        end
-    end
-    table.sort(sorted, function(a, b) return #a.match_expr > #b.match_expr end)
-    return sorted
-end
-
-function helper:has_prefix_match(match_expr, input_values)
-    for _, input_value in ipairs(input_values)
-    do
-        if input_value and #input_value >= #match_expr and input_value:sub(1, #match_expr) == match_expr then
+function helper:override_matches(input, override, token)
+    local input_values = ensure_list(helper:override_input_value(input, override, token))
+    for _, value in ipairs(input_values) do
+        local match_expr = override.match_expr
+        if match_expr == value or 
+            (override.match_type == "PREFIX" and value 
+            and #value >= #match_expr and value:sub(1, #match_expr) == match_expr)  then
             return true
         end
     end
     return false
 end
 
--- Function to find the best matching override for the header value.
--- Prioritizes exact matches first.
--- If no exact match, finds the longest prefix match.
--- Assumes keys are prefixes for partial matches
--- If multiple matches of the same length, returns the first one encountered after sorting by length descending.
--- if input defined has multiple values (i.e. multiple role claims), and there are multiple overrides that match,
--- the override with the most throughput is returned
 function helper:find_override(input, overrides, token)
     if not overrides or #overrides == 0 then
         return nil
     end
-    
+
     input = ensure_list(input)
-    local exact_match = helper:find_override_exact_match(input, overrides, token)
-    
-    if exact_match then
-        return exact_match
+    for _, override in ipairs(overrides) do
+        if helper:override_matches(input, override, token) then
+            return override
+        end
     end
-    -- No exact match, find longest prefix match
-    return helper:find_override_prefix_match(input, overrides, token)
+    return nil
 end
 
 local input_retriever = {
