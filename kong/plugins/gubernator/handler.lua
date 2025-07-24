@@ -197,7 +197,7 @@ function helper:find_override_prefix_match(input, overrides, token)
     -- Iterate through sorted keys to find the longest prefix
     for _, override in ipairs(sorted)
     do
-        local input_values = helper:ensure_list(helper:override_input_value(input, override, token))
+        local input_values = ensure_list(helper:override_input_value(input, override, token))
         if helper:has_prefix_match(override.match_expr, input_values) then
             table.insert(prefix_matches, override)
         end
