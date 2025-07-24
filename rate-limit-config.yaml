@@ -11,6 +11,7 @@ services:
     protocol: https
     read_timeout: 60000
     retries: 5
+    write_timeout: 60000
     routes:
       - https_redirect_status_code: 426
         name: httpbin-route
@@ -48,7 +49,7 @@ services:
                     - input_source: JWT_CLAIM
                       input_key_name: department
                       match_expr: "sales"
-                      limit: 0
+                      limit: 1
                       duration_seconds: 1
                     - input_source: JWT_CLAIM
                       input_key_name: department
@@ -59,9 +60,20 @@ services:
                   input_source: JWT_CLAIM
                   input_key_name: department
                   rate_limit_key_prefix: cdid
-                  limit: 100
+                  limit: 50
                   name: department-request-limit
                   limit_type: REQUESTS
                   methods:
                     - GET
-    write_timeout: 60000
+                  overrides:
+                    - input_source: INHERIT
+                      match_type: "PREFIX"
+                      match_expr: "engineering"
+                      limit: 1000
+                      duration_seconds: 1
+                    - input_source: INHERIT
+                      match_type: "PREFIX"
+                      match_expr: "sales"
+                      limit: 100
+                      duration_seconds: 1
+    

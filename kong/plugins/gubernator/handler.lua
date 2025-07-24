@@ -218,7 +218,7 @@ function helper:prefix_type_overrides(overrides)
             table.insert(sorted, override)
         end
     end
-    table.sort(sorted, function(a, b) return #a.match > #b.match end)
+    table.sort(sorted, function(a, b) return #a.match_expr > #b.match_expr end)
     return sorted
 end
 
