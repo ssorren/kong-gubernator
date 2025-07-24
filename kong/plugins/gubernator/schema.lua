@@ -1,11 +1,19 @@
 local typedefs = require "kong.db.schema.typedefs"
 
+local METHODS = {
+  "GET",
+  "HEAD",
+  "PUT",
+  "PATCH",
+  "POST",
+  "DELETE",
+  "OPTIONS",
+  "TRACE",
+  "CONNECT",
+}
 
-local PLUGIN_NAME = "gubernator"
-
-
-local schema = {
-  name = PLUGIN_NAME,
+return {
+  name = "gubernator",
   fields = {
     -- the 'fields' array is the top-level entry with fields defined by Kong
     { consumer = typedefs.no_consumer },  -- this plugin cannot be configured on a consumer
@@ -19,7 +27,7 @@ local schema = {
               required = false, }},
           { gubernator_host = {
               type = "string",
-              default = "localhost",
+              default = "127.0.0.1",
               required = false, }},
           { gubernator_port = {
               type = "string",
@@ -41,6 +49,14 @@ local schema = {
                     {name = {
                         type = "string",
                         required = true,
+                    }},
+                    {methods = {
+                        type = "array",
+                        default = METHODS,
+                        elements = {
+                            type = "string",
+                            one_of = METHODS,
+                        },
                     }},
                     {input_source = {
                         type = "string",
@@ -146,5 +162,3 @@ local schema = {
     },
   },
 }
-
-return schema                                    

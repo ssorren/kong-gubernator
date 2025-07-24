@@ -82,7 +82,7 @@ curl -i -X POST \
   --header "Content-Type: application/json" \
   --header "Authorization: Bearer ${PAT}" \
   --data "{
-    \"lua_schema\": $(jq -Rs '.' ./kong/plugins/<your plugin name>/schema.lua)
+    \"lua_schema\": $(jq -Rs '.' ./kong/plugins/gubernator/schema.lua)
   }"
 ```
 

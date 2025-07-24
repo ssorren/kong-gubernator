@@ -1,9 +1,10 @@
 local http              = require("resty.http")
-local cjson             = require("cjson.safe")
+local json_decode       = require("cjson.safe").decode
+local json_encode       = require("cjson.safe").encode
 local timer             = require("resty.timerng")
 local jwt               = require "kong.plugins.jwt.jwt_parser"
-local sha1 = require "resty.sha1"
-local to_hex = require "resty.string".to_hex
+local sha1              = require "resty.sha1"
+local to_hex            = require "resty.string".to_hex
 
 local GubernatorHandler = {
     PRIORITY = 910,
@@ -13,11 +14,32 @@ local GubernatorHandler = {
 local helper            = {}
 local request_timer
 
+local READ_BODY_METHODS = {
+    DELETE = true, -- this is a stretch, but lets allow it
+    PATCH = true,
+    POST = true,
+    PUT = true,
+}
 
 local function hash(key)
     local digest = sha1:new()
     digest:update(key)
     return to_hex(digest:final())
+end
+
+local function ensure_list(value)
+    if not value then
+        return value
+    end
+    if type(value) == "table" then
+        return value
+    end
+    return { value }
+end
+
+local function sort_overrides(a, b)
+    -- we're prioritizing high throughput in overrides
+    return (a.limit / a.duration_seconds) > (b.limit / b.duration_seconds)
 end
 
 function GubernatorHandler:init_worker()
@@ -38,7 +60,7 @@ function GubernatorHandler:access(conf)
         kong.log("Error calling gubernator: ", err)
         return
     end
-    local body, err2 = cjson.decode(result.body)
+    local body, err2 = json_decode(result)
     if err2 then
         kong.log("Error parsing gubernator response: ", err)
         return
@@ -64,11 +86,27 @@ function GubernatorHandler:body_filter(conf)
     if not status or status < 200 or status >= 300 then
         return
     end
+    if not READ_BODY_METHODS[kong.request.get_method()] then
+        return
+    end
+    
+    local has_token_rules = false
+    for _, rule in ipairs(conf.rules) do
+        if rule.limit_type == "TOKENS" then
+            has_token_rules = true
+            break
+        end
+    end
+    -- if we don't have any token rules, it's safe to return 
+    if not has_token_rules then
+        return
+    end
+
     local body = kong.response.get_raw_body()
     if not body then
         return
     end
-    local body_table, err = cjson.decode(body)
+    local body_table, err = json_decode(body)
     if err then
         kong.log("Error parsing body: ", err)
         kong.log("Error parsing body status: ", status)
@@ -82,18 +120,7 @@ function GubernatorHandler:body_filter(conf)
             return
         end
         helper:async_call_rate_limiter(conf, throttle_requests.by_token)
-        kong.log("response ctx:", cjson.encode(kong.ctx))
     end
-end
-
-function helper:ensure_list(value)
-    if not value then
-        return value
-    end
-    if type(value) == "table" then
-        return value
-    end
-    return { value }
 end
 
 function helper:get_jwt_token()
@@ -109,16 +136,21 @@ function helper:get_jwt_token()
 end
 
 function helper:call_rate_limiter(conf, throttle_requests)
-    local hits = cjson.encode({ requests = throttle_requests })
-    local url = conf.gubernator_protocol .. "://" .. conf.gubernator_host ..
-        ":" .. conf.gubernator_port .. "/v1/GetRateLimits"
-    return http.new():request_uri(url, {
+    local hits = json_encode({ requests = throttle_requests })
+    local url = conf.gubernator_protocol ..
+    "://" .. conf.gubernator_host .. ":" .. conf.gubernator_port .. "/v1/GetRateLimits"
+    local result, err = http.new():request_uri(url, {
+        keepalive = true,
+        keepalive_timeout = 100000,
+        keepalive_pool = 10,
         method = "POST",
         body = hits,
         headers = {
             ["Content-Type"] = "application/json",
         },
     })
+
+    return result.body, err
 end
 
 function helper:async_call_rate_limiter(conf, throttle_requests)
@@ -128,33 +160,25 @@ function helper:async_call_rate_limiter(conf, throttle_requests)
             kong.log("Error consuming throttle requests: ", err)
         end
     end
-    local _, err = request_timer:at(0.01, consume)
+    local _, err = request_timer:at(0.05, consume)
     if err then
         kong.log("Error scheduling requests: ", err)
     end
 end
 
-local function sort_overrides(a, b)
-    -- we're prioritizing high throughput in overrides
-    return (a.limit / a.duration_seconds) > (b.limit / b.duration_seconds)
-end
-
-
-function helper:find_override_exact_matches(input, overrides, token)
+function helper:find_override_exact_match(input, overrides, token)
     local matches = {}
     for _, override in ipairs(overrides)
     do
-        local input_values = helper:ensure_list(helper:override_input_value(input, override, token))
-        if not input_values or #input_values == 0 then
-            goto continue
-        end
-        for _, override_input in ipairs(input_values)
-        do
-            if override_input and override.match_expr == override_input then
-                table.insert(matches, override)
+        local input_values = ensure_list(helper:override_input_value(input, override, token))
+        if input_values and #input_values > 0 then
+            for _, override_input in ipairs(input_values)
+            do
+                if override_input and override.match_expr == override_input then
+                    table.insert(matches, override)
+                end
             end
         end
-        ::continue::
     end
 
     if #matches > 0 then
@@ -164,7 +188,29 @@ function helper:find_override_exact_matches(input, overrides, token)
     return nil
 end
 
-function helper:find_prefix_match(input, overrides, token)
+function helper:find_override_prefix_match(input, overrides, token)
+    local sorted = helper:prefix_type_overrides(overrides)
+    if #sorted == 0 then
+        return nil -- no prefix matchers available, safe ot return
+    end
+    local prefix_matches = {}
+    -- Iterate through sorted keys to find the longest prefix
+    for _, override in ipairs(sorted)
+    do
+        local input_values = helper:ensure_list(helper:override_input_value(input, override, token))
+        if helper:has_prefix_match(override.match_expr, input_values) then
+            table.insert(prefix_matches, override)
+        end
+    end
+
+    if #prefix_matches == 0 then
+        return nil
+    end
+    table.sort(prefix_matches, sort_overrides)
+    return prefix_matches[1]
+end
+
+function helper:prefix_type_overrides(overrides)
     local sorted = {}
     for _, override in ipairs(overrides)
     do
@@ -172,30 +218,18 @@ function helper:find_prefix_match(input, overrides, token)
             table.insert(sorted, override)
         end
     end
-    if #sorted == 0 then
-        return nil -- no prefix matchers available, safe ot return
-    end
     table.sort(sorted, function(a, b) return #a.match > #b.match end)
+    return sorted
+end
 
-    local prefix_matches = {}
-    -- Iterate through sorted keys to find the longest prefix
-    for _, override in ipairs(sorted)
+function helper:has_prefix_match(match_expr, input_values)
+    for _, input_value in ipairs(input_values)
     do
-        local input_values = helper:ensure_list(helper:override_input_value(input, override, token))
-        local key = override.match_expr
-        for _, input_value in ipairs(input_values)
-        do
-            if input_value and #input_value >= #key and input_value:sub(1, #key) == key then
-                table.insert(prefix_matches, override)
-                break
-            end
+        if input_value and #input_value >= #match_expr and input_value:sub(1, #match_expr) == match_expr then
+            return true
         end
     end
-    if #prefix_matches == 0 then
-        return nil
-    end
-    table.sort(prefix_matches, sort_overrides)
-    return prefix_matches[1]
+    return false
 end
 
 -- Function to find the best matching override for the header value.
@@ -209,32 +243,25 @@ function helper:find_override(input, overrides, token)
     if not overrides or #overrides == 0 then
         return nil
     end
-
-    if type(input) == "string" then
-        input = { input }
-    end
-    local exact_match = helper:find_override_exact_matches(input, overrides, token)
+    
+    input = ensure_list(input)
+    local exact_match = helper:find_override_exact_match(input, overrides, token)
+    
     if exact_match then
         return exact_match
     end
     -- No exact match, find longest prefix match
-    return helper:find_prefix_match(input, overrides, token)
+    return helper:find_override_prefix_match(input, overrides, token)
 end
 
 function helper:override_input_value(input, override, token)
     if override.input_source == "INHERIT" then
         return input
-    end
-
-    if override.input_source == "HEADER" then
+    elseif override.input_source == "HEADER" then
         return kong.request.get_header(override.input_key_name)
-    end
-
-    if override.input_source == "JWT_SUBJECT" then
+    elseif token and override.input_source == "JWT_SUBJECT" then
         return token.claims.sub
-    end
-
-    if override.input_source == "JWT_CLAIM" then
+    elseif token and override.input_source == "JWT_CLAIM" then
         return token.claims[override.input_key_name]
     end
     return nil
@@ -246,13 +273,23 @@ function helper:rule_input_value(rule, token)
     end
     if not token then
         kong.response.exit(401, { message = "Invalid JWT" })
+        return
     end
     if rule.input_source == "JWT_SUBJECT" then
         return token.claims.sub
-    end
-    if rule.input_source == "JWT_CLAIM" then
+    elseif rule.input_source == "JWT_CLAIM" then
         return token.claims[rule.input_key_name]
     end
+end
+
+local function has_request_method(rule, request_method)
+    for _, v in ipairs(rule.methods)
+    do
+        if v == request_method then
+            return true
+        end
+    end
+    return false
 end
 
 function helper:get_throttle_requests(conf, token, hits)
@@ -263,6 +300,9 @@ function helper:get_throttle_requests(conf, token, hits)
     }
     for _, rule in ipairs(conf.rules)
     do
+        if not has_request_method(rule, kong.request.get_method()) then
+            goto continue
+        end
         local input_value = helper:rule_input_value(rule, token)
         -- it is possible that input is a list (multiple values for a claim etc.).
         -- if so, we'll just grab the first in the list for now. we may want to come up with more deterministic behavior
@@ -273,7 +313,6 @@ function helper:get_throttle_requests(conf, token, hits)
             return nil
         end
 
-
         local limit = rule.limit
         local duration_seconds = rule.duration_seconds
 
@@ -283,7 +322,7 @@ function helper:get_throttle_requests(conf, token, hits)
             limit = override.limit
             duration_seconds = override.duration_seconds
         end
-        
+
         local req = {
             name = rule.name,
             unique_key = rule.rate_limit_key_prefix .. ":" .. rule.limit_type .. ":" .. hash(input_value),
@@ -298,6 +337,7 @@ function helper:get_throttle_requests(conf, token, hits)
         else
             table.insert(res.by_token, req)
         end
+        ::continue::
     end
 
     return res
