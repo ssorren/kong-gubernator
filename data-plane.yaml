@@ -41,7 +41,7 @@ spec:
         serviceAccountName: gubernator
         containers:
           - name: proxy
-            image: sal1103/kong-gubernated:1.0.0
+            image: sal1103/kong-gubernated:1.0.1
             imagePullPolicy: Always
             resources:
               requests:

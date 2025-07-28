@@ -13,6 +13,7 @@ local GubernatorHandler = {
 
 local helper            = {}
 local request_timer
+local request_template
 
 local READ_BODY_METHODS = {
     DELETE = true, -- this is a stretch, but lets allow it
@@ -51,6 +52,9 @@ function GubernatorHandler:init_worker()
 end
 
 function GubernatorHandler:configure(configs)
+    if not configs then
+        return true
+    end
     for _, config in ipairs(configs) do
         for _, rule in ipairs(config.rules) do
             if rule.overrides then
@@ -58,7 +62,6 @@ function GubernatorHandler:configure(configs)
             end
         end
     end
-    
     return true
 end
 
@@ -148,21 +151,44 @@ function helper:get_jwt_token()
 end
 
 function helper:call_rate_limiter(conf, throttle_requests)
+    local client = http:new()
+    local ok, err = client:connect({
+        scheme = conf.gubernator_protocol,
+        host = conf.gubernator_host,
+        port = conf.gubernator_port,
+        pool_size = 30,
+    })
+
+    if not ok then
+        kong.log("Conenct error: ", err)
+        return nil, err
+    end
     local hits = json_encode({ requests = throttle_requests })
-    local url = conf.gubernator_protocol ..
-    "://" .. conf.gubernator_host .. ":" .. conf.gubernator_port .. "/v1/GetRateLimits"
-    local result, err = http.new():request_uri(url, {
-        keepalive = true,
-        keepalive_timeout = 100000,
-        keepalive_pool = 10,
+    local res, err2 = client:request({
+        version = 1.1,
         method = "POST",
+        path = "/v1/GetRateLimits",
         body = hits,
         headers = {
             ["Content-Type"] = "application/json",
         },
     })
 
-    return result.body, err
+    if err2 then
+        kong.log("Result error: ", err)
+        return nil, err2
+    end
+
+    local body, err3 = res:read_body()
+    if not body then
+        kong.log("Body error: ", err)
+        return nil, err3
+    end
+    local _, err4 = client:set_keepalive(100000)
+    if err4 then
+        kong.log("Failed to keep socket alive: ", err4)
+    end
+    return body, nil
 end
 
 function helper:async_call_rate_limiter(conf, throttle_requests)
