@@ -25,6 +25,11 @@ spec:
       name: konnect-config1
       group: konnect.konghq.com
   deployment:
+    rollout:
+       strategy:
+         blueGreen:
+           promotion:
+             strategy: BreakBeforePromotion
     scaling:
       horizontal:
         minReplicas: 1
@@ -45,10 +50,10 @@ spec:
             imagePullPolicy: Always
             resources:
               requests:
-                cpu: 1
+                cpu: "0.5"
                 memory: "1Gi"
               limits:
-                cpu: 2
+                cpu: 1
                 memory: "2Gi"
             env:
               - name: KONG_LOG_LEVEL
@@ -63,9 +68,9 @@ spec:
           - image: ghcr.io/gubernator-io/gubernator:v2.13.0
             resources:
               requests:
-                cpu: 1
+                cpu: "0.5"
               limits:
-                cpu: 2
+                cpu: 1
             imagePullPolicy: IfNotPresent
             ports:
               - name: grpc-port
@@ -76,9 +81,6 @@ spec:
             env:
               - name: GUBER_K8S_NAMESPACE
                 value: kong
-                # valueFrom:
-                #  fieldRef:
-                #   fieldPath: metadata.namespacekong
               - name: GUBER_K8S_POD_IP
                 valueFrom:
                   fieldRef:

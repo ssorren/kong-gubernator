@@ -3,7 +3,7 @@ local json_decode       = require("cjson.safe").decode
 local json_encode       = require("cjson.safe").encode
 local timer             = require("resty.timerng")
 local jwt               = require "kong.plugins.jwt.jwt_parser"
-local sha1              = require "resty.sha1"
+local md5               = require "resty.md5"
 local to_hex            = require "resty.string".to_hex
 
 local GubernatorHandler = {
@@ -13,7 +13,6 @@ local GubernatorHandler = {
 
 local helper            = {}
 local request_timer
-local request_template
 
 local READ_BODY_METHODS = {
     DELETE = true, -- this is a stretch, but lets allow it
@@ -22,9 +21,9 @@ local READ_BODY_METHODS = {
     PUT = true,
 }
 
-local function hash(key)
-    local digest = sha1:new()
-    digest:update(key)
+local function hash(...)
+    local digest = md5:new()
+    digest:update(table.concat({...}, ":"))
     return to_hex(digest:final())
 end
 
@@ -211,7 +210,13 @@ function helper:override_matches(input, override, token)
         if match_expr == value or 
             (override.match_type == "PREFIX" and value 
             and #value >= #match_expr and value:sub(1, #match_expr) == match_expr)  then
-            return true
+                -- we may need to override the key to be used for rate limiting
+                -- for instance, if we limiting off of a group/team and the user ha multiple teams
+                -- we would need to ensure that the key used in gubernator matches the override returned
+                if override.input_source == "INHERIT" then
+                    return true, value
+                end
+                return true, input
         end
     end
     return false
@@ -219,16 +224,17 @@ end
 
 function helper:find_override(input, overrides, token)
     if not overrides or #overrides == 0 then
-        return nil
+        return input
     end
 
     input = ensure_list(input)
     for _, override in ipairs(overrides) do
-        if helper:override_matches(input, override, token) then
-            return override
+        local ok, input_override = helper:override_matches(input, override, token)
+        if ok then
+            return override, input_override
         end
     end
-    return nil
+    return nil, input
 end
 
 local input_retriever = {
@@ -309,15 +315,15 @@ function helper:get_throttle_requests(conf, token, hits)
         local duration_seconds = rule.duration_seconds
 
         -- Check to see if there are overrides that match this request
-        local override = helper:find_override(input_value, rule.overrides, token)
+        local override, key = helper:find_override(input_value, rule.overrides, token)
         if override then
             limit = override.limit
             duration_seconds = override.duration_seconds
         end
-
+        
         local req = {
             name = rule.name,
-            unique_key = rule.rate_limit_key_prefix .. ":" .. rule.limit_type .. ":" .. hash(input_value),
+            unique_key = hash(rule.rate_limit_key_prefix, rule.limit_type, key),
             hits = hits,
             limit = limit,
             duration = duration_seconds * 1000,
