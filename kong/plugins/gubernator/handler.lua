@@ -219,12 +219,12 @@ function helper:override_matches(input, override, token)
                 return true, input
         end
     end
-    return false
+    return false, input
 end
 
 function helper:find_override(input, overrides, token)
     if not overrides or #overrides == 0 then
-        return input
+        return nil, input
     end
 
     input = ensure_list(input)
@@ -255,6 +255,7 @@ local input_retriever = {
             for i, g in ipairs(groups) do
                 table.insert(names, i, g.name)
             end
+            return groups
         end
         return nil
     end,
@@ -320,10 +321,11 @@ function helper:get_throttle_requests(conf, token, hits)
             limit = override.limit
             duration_seconds = override.duration_seconds
         end
+
         
         local req = {
             name = rule.name,
-            unique_key = hash(rule.rate_limit_key_prefix, rule.limit_type, key),
+            unique_key = hash(rule.rate_limit_key_prefix, rule.limit_type, input_value),
             hits = hits,
             limit = limit,
             duration = duration_seconds * 1000,
