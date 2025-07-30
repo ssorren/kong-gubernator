@@ -226,8 +226,6 @@ function helper:find_override(input, overrides, token)
     if not overrides or #overrides == 0 then
         return nil, input
     end
-
-    input = ensure_list(input)
     for _, override in ipairs(overrides) do
         local ok, input_override = helper:override_matches(input, override, token)
         if ok then
@@ -304,7 +302,8 @@ function helper:get_throttle_requests(conf, token, hits)
         end
         local input_value = helper:rule_input_value(rule, token)
         -- it is possible that input is a list (multiple values for a claim etc.).
-        -- if so, we'll just grab the first in the list for now. we may want to come up with more deterministic behavior
+        -- if so, we'll just grab the first in the list for now. we may want to 
+        -- come up with more deterministic behavior
         if input_value and type(input_value) == "table" and #input_value > 0 then
             input_value = input_value[1]
         end
@@ -321,11 +320,11 @@ function helper:get_throttle_requests(conf, token, hits)
             limit = override.limit
             duration_seconds = override.duration_seconds
         end
-
+        kong.log("override key: ", key)
         
         local req = {
             name = rule.name,
-            unique_key = hash(rule.rate_limit_key_prefix, rule.limit_type, input_value),
+            unique_key = hash(rule.rate_limit_key_prefix, rule.limit_type, key),
             hits = hits,
             limit = limit,
             duration = duration_seconds * 1000,

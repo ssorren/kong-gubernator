@@ -25,11 +25,11 @@ spec:
       name: konnect-config1
       group: konnect.konghq.com
   deployment:
-    rollout:
-       strategy:
-         blueGreen:
-           promotion:
-             strategy: BreakBeforePromotion
+    # rollout:
+    #    strategy:
+    #      blueGreen:
+    #        promotion:
+    #          strategy: BreakBeforePromotion
     scaling:
       horizontal:
         minReplicas: 1
@@ -56,6 +56,16 @@ spec:
                 cpu: 1
                 memory: "2Gi"
             env:
+              # - name: KONG_SSL_CERT
+              #   valueFrom:
+              #     secretKeyRef:
+              #       name: my-tls-secret
+              #       key: tls.crt
+              # - name: KONG_SSL_CERT_KEY
+              #   valueFrom:
+              #     secretKeyRef:
+              #       name: my-tls-secret
+              #       key: tls.key
               - name: KONG_LOG_LEVEL
                 value: notice
               - name: KONG_PROXY_ACCESS_LOG
