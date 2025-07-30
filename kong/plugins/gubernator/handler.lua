@@ -320,7 +320,6 @@ function helper:get_throttle_requests(conf, token, hits)
             limit = override.limit
             duration_seconds = override.duration_seconds
         end
-        kong.log("override key: ", key)
         
         local req = {
             name = rule.name,
