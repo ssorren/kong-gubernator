@@ -6,7 +6,6 @@ services:
     enabled: true
     host: httpbin.konghq.com
     name: httpbin-service
-    path: /get
     port: 443
     protocol: https
     read_timeout: 60000
@@ -25,7 +24,7 @@ services:
         regex_priority: 0
         request_buffering: true
         response_buffering: true
-        strip_path: true
+        strip_path: false
         plugins:
           - name: gubernator
             config:
@@ -50,12 +49,12 @@ services:
                       input_key_name: department
                       match_expr: "sales"
                       limit: 1
-                      duration_seconds: 1
+                      duration_seconds: 5
                     - input_source: JWT_CLAIM
                       input_key_name: department
                       match_expr: "customer-service"
                       limit: 1
-                      duration_seconds: 3
+                      duration_seconds: 10
                 - duration_seconds: 1
                   input_source: JWT_CLAIM
                   input_key_name: department

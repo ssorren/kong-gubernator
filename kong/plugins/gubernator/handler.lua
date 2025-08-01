@@ -5,6 +5,7 @@ local timer             = require("resty.timerng")
 local jwt               = require "kong.plugins.jwt.jwt_parser"
 local md5               = require "resty.md5"
 local to_hex            = require "resty.string".to_hex
+local kong              = kong
 
 local GubernatorHandler = {
     PRIORITY = 910,
@@ -190,6 +191,14 @@ function helper:call_rate_limiter(conf, throttle_requests)
     return body, nil
 end
 
+local function to_set(v)
+    local set = {}
+    for _, k in ipairs(v) do
+        set[k] = true
+    end
+    return set
+end
+
 function helper:async_call_rate_limiter(conf, throttle_requests)
     local function consume()
         local _, err = helper:call_rate_limiter(conf, throttle_requests)
@@ -197,37 +206,51 @@ function helper:async_call_rate_limiter(conf, throttle_requests)
             kong.log("Error consuming throttle requests: ", err)
         end
     end
-    local _, err = request_timer:at(0.05, consume)
+    local _, err = request_timer:at(0, consume)
     if err then
         kong.log("Error scheduling requests: ", err)
     end
 end
 
-function helper:override_matches(input, override, token)
-    local input_values = ensure_list(helper:override_input_value(input, override, token))
+-- we may need to override the key to be used for rate limiting
+-- for instance, if we limiting off of a group/team and the user ha multiple teams
+-- we would need to ensure that the key used in gubernator matches the override returned
+local function key_for_override(original_key, override, candidate)
+    if override.input_source == "INHERIT" then
+        return (candidate or override.match_expr)
+    end
+    return original_key
+end
+
+function helper:override_matches(input, rule, override, token)
+    local input_rule = override
+    if override.input_source == "INHERIT" then 
+        input_rule = rule
+    end
+    local input_values = ensure_list(helper:rule_input_value(input_rule, token))
+    -- prioritize exact matches
+    if to_set(input_values)[override.match_expr] then
+        return true, key_for_override(input, override, nil)
+    end
+    if not override.match_type == "PREFIX" then
+        return false, input
+    end
     for _, value in ipairs(input_values) do
         local match_expr = override.match_expr
-        if match_expr == value or 
-            (override.match_type == "PREFIX" and value 
-            and #value >= #match_expr and value:sub(1, #match_expr) == match_expr)  then
-                -- we may need to override the key to be used for rate limiting
-                -- for instance, if we limiting off of a group/team and the user ha multiple teams
-                -- we would need to ensure that the key used in gubernator matches the override returned
-                if override.input_source == "INHERIT" then
-                    return true, value
-                end
-                return true, input
+        if value and #value >= #match_expr and value:sub(1, #match_expr) == match_expr  then
+            return true, key_for_override(input, override, value)
         end
     end
     return false, input
 end
 
-function helper:find_override(input, overrides, token)
+function helper:find_override(input, rule, token)
+    local overrides = rule.overrides
     if not overrides or #overrides == 0 then
         return nil, input
     end
     for _, override in ipairs(overrides) do
-        local ok, input_override = helper:override_matches(input, override, token)
+        local ok, input_override = helper:override_matches(input, rule, override, token)
         if ok then
             return override, input_override
         end
@@ -236,8 +259,7 @@ function helper:find_override(input, overrides, token)
 end
 
 local input_retriever = {
-    ["INHERIT"] = function(input, rule, token) return input end,
-    ["CONSUMER_ID"] = function(input, rule, token)
+    ["CONSUMER_ID"] = function(rule, token)
         local consumer = kong.client.get_consumer()
         if consumer then
             return consumer.id
@@ -245,7 +267,7 @@ local input_retriever = {
             return nil
         end
     end,
-    ["HEADER"] = function(input, rule, token) return kong.request.get_header(rule.input_key_name) end,
+    ["HEADER"] = function(rule, token) return kong.request.get_header(rule.input_key_name) end,
     ["CONSUMER_GROUP_NAME"] = function(input, rule, token) 
         local groups = kong.client.get_consumer_groups()
         if groups and #groups then
@@ -257,13 +279,13 @@ local input_retriever = {
         end
         return nil
     end,
-    ["JWT_SUBJECT"] = function(input, rule, token) 
+    ["JWT_SUBJECT"] = function(rule, token) 
         if token then
             return token.claims.sub
         end
         return nil
      end,
-    ["JWT_CLAIM"] = function(input, rule, token)
+    ["JWT_CLAIM"] = function(rule, token)
         if token then
             return token.claims[rule.input_key_name]
         end
@@ -271,12 +293,8 @@ local input_retriever = {
     end,
 }
 
-function helper:override_input_value(input, override, token)
-    return input_retriever[override.input_source](input, override, token)
-end
-
 function helper:rule_input_value(rule, token)
-    return input_retriever[rule.input_source](nil, rule, token)
+    return input_retriever[rule.input_source](rule, token)
 end
 
 local function has_request_method(rule, request_method)
@@ -301,13 +319,14 @@ function helper:get_throttle_requests(conf, token, hits)
             goto continue
         end
         local input_value = helper:rule_input_value(rule, token)
+        local original_input = input_value
         -- it is possible that input is a list (multiple values for a claim etc.).
         -- if so, we'll just grab the first in the list for now. we may want to 
         -- come up with more deterministic behavior
-        if input_value and type(input_value) == "table" and #input_value > 0 then
-            input_value = input_value[1]
+        if original_input and type(original_input) == "table" and #original_input > 0 then
+            original_input = original_input[1]
         end
-        if not input_value or #input_value == 0 then
+        if not original_input or #original_input == 0 then
             return nil
         end
 
@@ -315,12 +334,12 @@ function helper:get_throttle_requests(conf, token, hits)
         local duration_seconds = rule.duration_seconds
 
         -- Check to see if there are overrides that match this request
-        local override, key = helper:find_override(input_value, rule.overrides, token)
+        local override, key = helper:find_override(original_input, rule, token)
         if override then
             limit = override.limit
             duration_seconds = override.duration_seconds
         end
-        
+        kong.log("throttling on input key: ", rule.rate_limit_key_prefix, ":", key, " limit: ", limit , "/", duration_seconds, " seconds")
         local req = {
             name = rule.name,
             unique_key = hash(rule.rate_limit_key_prefix, rule.limit_type, key),
