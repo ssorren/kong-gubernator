@@ -192,6 +192,7 @@ function helper:call_rate_limiter(conf, throttle_requests)
 end
 
 local function to_set(v)
+    if not v then return {} end
     local set = {}
     for _, k in ipairs(v) do
         set[k] = true
