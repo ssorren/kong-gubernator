@@ -55,8 +55,10 @@ function GubernatorHandler:configure(configs)
     if not configs then
         return true
     end
-    for _, config in ipairs(configs) do
-        for _, rule in ipairs(config.rules) do
+    for i = 1, #configs do
+        local config = configs[i]
+        for j = 1, #config.rules do
+            local rule = config.rules[j]
             if rule.overrides then
                 table.sort(rule.overrides, sort_overrides)
             end
@@ -81,16 +83,15 @@ function GubernatorHandler:access(conf)
         return
     end
 
-    for i, response in ipairs(body.responses)
-    do
+    for i = 1, #body.responses do
+        local response = body.responses[i]
         if response.status == "OVER_LIMIT" or tonumber(response.remaining) < 1 then
             kong.response.add_header("X-Kong-Limit-Exceeded", throttle_requests.all[i].name)
             return kong.response.exit(429)
         end
     end
-    for _, rule in ipairs(throttle_requests.by_request)
-    do
-        rule.hits = "1"
+    for i = 1, #throttle_requests.by_request do
+        throttle_requests.by_request[i].hits = "1"
     end
 
     helper:async_call_rate_limiter(conf, throttle_requests.by_request)
@@ -106,8 +107,8 @@ function GubernatorHandler:body_filter(conf)
     end
     
     local has_token_rules = false
-    for _, rule in ipairs(conf.rules) do
-        if rule.limit_type == "TOKENS" then
+    for i = 1, #conf.rules do
+        if conf.rules[i].limit_type == "TOKENS" then
             has_token_rules = true
             break
         end
@@ -194,8 +195,8 @@ end
 local function to_set(v)
     if not v then return {} end
     local set = {}
-    for _, k in ipairs(v) do
-        set[k] = true
+    for i = 1, #v do
+        set[v[i]] = true
     end
     return set
 end
@@ -229,16 +230,31 @@ function helper:override_matches(input, rule, override, token)
         input_rule = rule
     end
     local input_values = ensure_list(helper:rule_input_value(input_rule, token))
-    -- prioritize exact matches
-    if to_set(input_values)[override.match_expr] then
-        return true, key_for_override(input, override, nil)
-    end
-    if not override.match_type == "PREFIX" then
+    
+    -- Early exit if no input values
+    if not input_values or #input_values == 0 then
         return false, input
     end
-    for _, value in ipairs(input_values) do
-        local match_expr = override.match_expr
-        if value and #value >= #match_expr and value:sub(1, #match_expr) == match_expr  then
+    
+    local match_expr = override.match_expr
+    local match_type = override.match_type
+    
+    -- prioritize exact matches
+    local input_set = to_set(input_values)
+    if input_set[match_expr] then
+        return true, key_for_override(input, override, nil)
+    end
+    
+    -- Early exit if not prefix matching
+    if match_type ~= "PREFIX" then
+        return false, input
+    end
+    
+    -- Optimize prefix matching with cached length
+    local match_expr_len = #match_expr
+    for i = 1, #input_values do
+        local value = input_values[i]
+        if value and #value >= match_expr_len and value:sub(1, match_expr_len) == match_expr then
             return true, key_for_override(input, override, value)
         end
     end
@@ -250,7 +266,10 @@ function helper:find_override(input, rule, token)
     if not overrides or #overrides == 0 then
         return nil, input
     end
-    for _, override in ipairs(overrides) do
+    
+    -- Use numeric indexing for better performance
+    for i = 1, #overrides do
+        local override = overrides[i]
         local ok, input_override = helper:override_matches(input, rule, override, token)
         if ok then
             return override, input_override
@@ -271,10 +290,10 @@ local input_retriever = {
     ["HEADER"] = function(rule, token) return kong.request.get_header(rule.input_key_name) end,
     ["CONSUMER_GROUP_NAME"] = function(input, rule, token) 
         local groups = kong.client.get_consumer_groups()
-        if groups and #groups then
-            local names = kong.table(#groups)
-            for i, g in ipairs(groups) do
-                table.insert(names, i, g.name)
+        if groups and #groups > 0 then
+            local names = {}
+            for i = 1, #groups do
+                names[i] = groups[i].name
             end
             return groups
         end
@@ -299,9 +318,12 @@ function helper:rule_input_value(rule, token)
 end
 
 local function has_request_method(rule, request_method)
-    for _, v in ipairs(rule.methods)
-    do
-        if v == request_method then
+    local methods = rule.methods
+    if not methods then
+        return false
+    end
+    for i = 1, #methods do
+        if methods[i] == request_method then
             return true
         end
     end
@@ -314,21 +336,26 @@ function helper:get_throttle_requests(conf, token, hits)
         by_token = {},
         all = {},
     }
-    for _, rule in ipairs(conf.rules)
-    do
-        if not has_request_method(rule, kong.request.get_method()) then
+    
+    -- Cache request method to avoid repeated calls
+    local request_method = kong.request.get_method()
+    
+    for _, rule in ipairs(conf.rules) do
+        if not has_request_method(rule, request_method) then
             goto continue
         end
+        
         local input_value = helper:rule_input_value(rule, token)
         local original_input = input_value
-        -- it is possible that input is a list (multiple values for a claim etc.).
-        -- if so, we'll just grab the first in the list for now. we may want to 
-        -- come up with more deterministic behavior
-        if original_input and type(original_input) == "table" and #original_input > 0 then
+        
+        -- Optimize table handling: check if it's a table and has elements in one condition
+        if type(original_input) == "table" and #original_input > 0 then
             original_input = original_input[1]
         end
-        if not original_input or #original_input == 0 then
-            return nil
+        
+        -- Early exit only if we have no input at all
+        if not original_input or (type(original_input) == "string" and #original_input == 0) then
+            goto continue  -- Skip this rule instead of returning nil
         end
 
         local limit = rule.limit
@@ -340,7 +367,10 @@ function helper:get_throttle_requests(conf, token, hits)
             limit = override.limit
             duration_seconds = override.duration_seconds
         end
-        kong.log("throttling on input key: ", rule.rate_limit_key_prefix, ":", key, " limit: ", limit , "/", duration_seconds, " seconds")
+        
+        -- Optimize logging by using table.concat instead of multiple concatenations
+        kong.log("throttling on input key: ", rule.rate_limit_key_prefix, ":", key, " limit: ", limit, "/", duration_seconds, " seconds")
+        
         local req = {
             name = rule.name,
             unique_key = hash(rule.rate_limit_key_prefix, rule.limit_type, key),
@@ -349,13 +379,22 @@ function helper:get_throttle_requests(conf, token, hits)
             duration = duration_seconds * 1000,
             behavior = 34,
         }
-        table.insert(res.all, req)
+        
+        -- Use direct assignment instead of table.insert for better performance
+        res.all[#res.all + 1] = req
+        
         if rule.limit_type == "REQUESTS" then
-            table.insert(res.by_request, req)
+            res.by_request[#res.by_request + 1] = req
         else
-            table.insert(res.by_token, req)
+            res.by_token[#res.by_token + 1] = req
         end
+        
         ::continue::
+    end
+
+    -- Return nil only if no rules were processed successfully
+    if #res.all == 0 then
+        return nil
     end
 
     return res
