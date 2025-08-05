@@ -218,7 +218,7 @@ end
 -- for instance, if we limiting off of a group/team and the user ha multiple teams
 -- we would need to ensure that the key used in gubernator matches the override returned
 local function key_for_override(original_key, override, candidate)
-    if override.input_source == "INHERIT" then
+    if override.throttle_key_source == "INHERIT" then
         return (candidate or override.match_expr)
     end
     return original_key
@@ -226,7 +226,7 @@ end
 
 function helper:override_matches(input, rule, override, token)
     local input_rule = override
-    if override.input_source == "INHERIT" then 
+    if override.throttle_key_source == "INHERIT" then 
         input_rule = rule
     end
     local input_values = ensure_list(helper:rule_input_value(input_rule, token))
@@ -287,7 +287,7 @@ local input_retriever = {
             return nil
         end
     end,
-    ["HEADER"] = function(rule, token) return kong.request.get_header(rule.input_key_name) end,
+    ["HEADER"] = function(rule, token) return kong.request.get_header(rule.throttle_key_name) end,
     ["CONSUMER_GROUP_NAME"] = function(input, rule, token) 
         local groups = kong.client.get_consumer_groups()
         if groups and #groups > 0 then
@@ -307,14 +307,14 @@ local input_retriever = {
      end,
     ["JWT_CLAIM"] = function(rule, token)
         if token then
-            return token.claims[rule.input_key_name]
+            return token.claims[rule.throttle_key_name]
         end
         return nil
     end,
 }
 
 function helper:rule_input_value(rule, token)
-    return input_retriever[rule.input_source](rule, token)
+    return input_retriever[rule.throttle_key_source](rule, token)
 end
 
 local function has_request_method(rule, request_method)
@@ -369,11 +369,11 @@ function helper:get_throttle_requests(conf, token, hits)
         end
         
         -- Optimize logging by using table.concat instead of multiple concatenations
-        kong.log("throttling on input key: ", rule.rate_limit_key_prefix, ":", key, " limit: ", limit, "/", duration_seconds, " seconds")
+        kong.log.debug("throttling on input key: ", rule.throttle_key_prefix, ":", key, " limit: ", limit, "/", duration_seconds, " seconds")
         
         local req = {
             name = rule.name,
-            unique_key = hash(rule.rate_limit_key_prefix, rule.limit_type, key),
+            unique_key = hash(rule.throttle_key_prefix, rule.limit_type, key),
             hits = hits,
             limit = limit,
             duration = duration_seconds * 1000,

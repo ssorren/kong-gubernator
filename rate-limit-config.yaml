@@ -32,45 +32,45 @@ services:
               global_limit: -1
               rules:
                 - duration_seconds: 3
-                  input_source: JWT_SUBJECT
-                  rate_limit_key_prefix: csub
+                  throttle_key_source: JWT_SUBJECT
+                  throttle_key_prefix: csub
                   limit: 1
                   name: session-request-limit
                   limit_type: REQUESTS
                   methods:
                     - GET
                   overrides:
-                    - input_source: JWT_CLAIM
-                      input_key_name: department
+                    - throttle_key_source: JWT_CLAIM
+                      throttle_key_name: department
                       match_expr: "engineering"
                       limit: 10
                       duration_seconds: 1
-                    - input_source: JWT_CLAIM
-                      input_key_name: department
+                    - throttle_key_source: JWT_CLAIM
+                      throttle_key_name: department
                       match_expr: "sales"
                       limit: 1
                       duration_seconds: 5
-                    - input_source: JWT_CLAIM
-                      input_key_name: department
+                    - throttle_key_source: JWT_CLAIM
+                      throttle_key_name: department
                       match_expr: "customer-service"
                       limit: 1
                       duration_seconds: 10
                 - duration_seconds: 1
-                  input_source: JWT_CLAIM
-                  input_key_name: department
-                  rate_limit_key_prefix: cdid
+                  throttle_key_source: JWT_CLAIM
+                  throttle_key_name: department
+                  throttle_key_prefix: cdid
                   limit: 50
                   name: department-request-limit
                   limit_type: REQUESTS
                   methods:
                     - GET
                   overrides:
-                    - input_source: INHERIT
+                    - throttle_key_source: INHERIT
                       match_type: "PREFIX"
                       match_expr: "engineering"
                       limit: 1000
                       duration_seconds: 1
-                    - input_source: INHERIT
+                    - throttle_key_source: INHERIT
                       match_type: "PREFIX"
                       match_expr: "sales"
                       limit: 100

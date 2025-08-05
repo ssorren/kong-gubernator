@@ -58,7 +58,7 @@ return {
                             one_of = METHODS,
                         },
                     }},
-                    {input_source = {
+                    {throttle_key_source = {
                         type = "string",
                         required = true,
                         default = "HEADER",
@@ -71,11 +71,11 @@ return {
                         },
 
                     }},
-                    {input_key_name = {
+                    {throttle_key_name = {
                         type = "string",
                         required = false,
                     }},
-                    {rate_limit_key_prefix = {
+                    {throttle_key_prefix = {
                         type = "string",
                         required = true,
                     }},
@@ -107,7 +107,7 @@ return {
                                     type = "string",
                                     required = false,
                                 }},
-                                {input_source = {
+                                {throttle_key_source = {
                                     type = "string",
                                     required = true,
                                     default = "INHERIT",
@@ -121,7 +121,7 @@ return {
                                     },
 
                                 }},
-                                {input_key_name = {
+                                {throttle_key_name = {
                                     type = "string",
                                     required = false,
                                 }},
