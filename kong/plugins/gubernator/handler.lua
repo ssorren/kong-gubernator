@@ -181,7 +181,7 @@ function helper:call_rate_limiter(conf, throttle_requests)
     end
 
     local body, err3 = res:read_body()
-    if not body then
+    if err3 then
         kong.log("Body error: ", err)
         return nil, err3
     end
