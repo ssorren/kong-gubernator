@@ -1,0 +1,94 @@
+kind: KonnectExtension
+apiVersion: konnect.konghq.com/v1alpha1
+metadata:
+  name: konnect-config1
+  namespace: kong
+spec:
+  clientAuth:
+    certificateSecret:
+      provisioning: Automatic
+  konnect:
+    controlPlane:
+      ref:
+        type: konnectNamespacedRef
+        konnectNamespacedRef:
+          name: gubernator
+---
+apiVersion: gateway-operator.konghq.com/v1beta1
+kind: DataPlane
+metadata:
+  name: dataplane1
+  namespace: kong
+spec:
+  extensions:
+    - kind: KonnectExtension
+      name: konnect-config1
+      group: konnect.konghq.com
+  deployment:
+    # rollout:
+    #    strategy:
+    #      blueGreen:
+    #        promotion:
+    #          strategy: BreakBeforePromotion
+    scaling:
+      horizontal:
+        minReplicas: 1
+        maxReplicas: 10
+        metrics:
+          - type: Resource
+            resource:
+              name: cpu
+              target:
+                type: Utilization
+                averageUtilization: 50
+    podTemplateSpec:
+      spec:
+        serviceAccountName: gubernator
+        # volumes:
+        #   - name: tls-volume
+        #     secret:
+        #       secretName: kong-tls-secret
+        containers:
+          - name: proxy
+            image: sal1103/kong-gubernated:1.0.1
+            imagePullPolicy: Always
+            resources:
+              requests:
+                cpu: "0.5"
+                memory: "1Gi"
+              limits:
+                cpu: 1
+                memory: "2Gi"
+            # volumeMounts:
+            #   - name: tls-volume
+            #     mountPath: /etc/kong/tls
+            #     readOnly: true
+            env:
+              # - name: KONG_SSL_CERT
+              #   value: "/etc/kong/tls/tls.crt"
+              # - name: KONG_SSL_CERT_KEY
+              #   value: "/etc/kong/tls/tls.key"
+              - name: KONG_LOG_LEVEL
+                value: notice
+              - name: KONG_PROXY_ACCESS_LOG
+                value: "off"
+              - name: KONG_NGINX_WORKER_PROCESSES
+                value: "4"
+              - name: KONG_PLUGINS
+                value: "bundled,gubernator"
+  network:
+    services:
+      ingress:
+        name: proxy1
+        type: LoadBalancer
+        ports:
+          - name: http
+            port: 80
+            targetPort: 8000
+          - name: https
+            port: 443
+            targetPort: 8443
+        #  annotations:
+        #    "service.beta.kubernetes.io/aws-load-balancer-type": "nlb"
+        #    "service.beta.kubernetes.io/aws-load-balancer-nlb-target-type": "ip"
+        #    "service.beta.kubernetes.io/aws-load-balancer-scheme": "internet-facing"
