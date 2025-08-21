@@ -50,7 +50,7 @@ spec:
         #       secretName: kong-tls-secret
         containers:
           - name: proxy
-            image: sal1103/kong-gubernated:1.0.1
+            image: kong/kong-gateway:3.11
             imagePullPolicy: Always
             resources:
               requests:
