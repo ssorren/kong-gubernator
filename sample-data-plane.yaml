@@ -12,7 +12,7 @@ spec:
       ref:
         type: konnectNamespacedRef
         konnectNamespacedRef:
-          name: gubernator
+          name: my-kong
 ---
 apiVersion: gateway-operator.konghq.com/v1beta1
 kind: DataPlane
@@ -43,7 +43,7 @@ spec:
                 averageUtilization: 50
     podTemplateSpec:
       spec:
-        serviceAccountName: gubernator
+        serviceAccountName: my-kong
         # volumes:
         #   - name: tls-volume
         #     secret:
